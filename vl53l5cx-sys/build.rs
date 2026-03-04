@@ -44,9 +44,12 @@ fn main() {
         bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_USE_MOTION_INDICATOR=1");
     }
 
-    // If the motion feature is disabled, we must tell the C header to remove the
-    // `motion_indicator` field from the VL53L5CX_ResultsData struct to keep layouts compatible.
+    // If the motion feature is disabled, we must tell BOTH the C compiler and
+    // bindgen to remove the `motion_indicator` field from VL53L5CX_ResultsData.
+    // This also affects VL53L5CX_MAX_RESULTS_SIZE and thus temp_buffer size —
+    // a mismatch causes buffer overflows at runtime.
     if env::var("CARGO_FEATURE_MOTION").is_err() {
+        cc_build.define("VL53L5CX_DISABLE_MOTION_INDICATOR", "1");
         bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_MOTION_INDICATOR");
     }
 
@@ -117,6 +120,38 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
         bindgen_builder = bindgen_builder
             .clang_arg(format!("--sysroot={}", sysroot))
             .clang_arg(format!("--target={}", target));
+    } else if target.starts_with("thumbv") {
+        // Bare-metal ARM cross-compilation (e.g. thumbv7em-none-eabihf).
+        // The CC_<target> and AR_<target> env vars tell the `cc` crate which
+        // cross-compiler to use. We query it for include paths so that
+        // bindgen's clang can find stdint.h, string.h, etc.
+        let compiler = cc_build.get_compiler();
+
+        bindgen_builder = bindgen_builder
+            .clang_arg(format!("--target={}", target))
+            .clang_arg("-ffreestanding");
+
+        // GCC built-in headers (stdint.h, stddef.h, etc.)
+        if let Ok(output) = std::process::Command::new(compiler.path())
+            .arg("-print-file-name=include")
+            .output()
+        {
+            let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !p.is_empty() && p != "include" {
+                bindgen_builder = bindgen_builder.clang_arg(format!("-isystem{}", p));
+            }
+        }
+
+        // C library headers from the cross-toolchain (newlib string.h, etc.)
+        if let Ok(output) = std::process::Command::new(compiler.path())
+            .arg("-print-sysroot")
+            .output()
+        {
+            let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !p.is_empty() {
+                bindgen_builder = bindgen_builder.clang_arg(format!("-isystem{}/include", p));
+            }
+        }
     }
 
     // Compile the C sources into a static library
