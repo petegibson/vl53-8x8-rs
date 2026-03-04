@@ -154,7 +154,7 @@ pub enum Error<E> {
     NotAlive,
     Firmware(FirmwareError),
     PinMissing,
-    Pin(E),
+    Pin,
 }
 
 #[cfg(feature = "std")]
@@ -175,7 +175,7 @@ impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
             Error::NotAlive => write!(f, "Sensor not found at address"),
             Error::Firmware(e) => write!(f, "Firmware error: {:?}", e),
             Error::PinMissing => write!(f, "A required hardware pin was not configured"),
-            Error::Pin(e) => write!(f, "Pin error: {:?}", e),
+            Error::Pin => write!(f, "Pin error"),
         }
     }
 }
@@ -221,13 +221,13 @@ where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug,
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
     INT: InputPin, 
-    <INT as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug,
+    <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub fn wait_for_data_ready_blocking(&mut self) -> Result<(), Error<E>> {
         loop {
-            let is_high_result = self.int_pin.is_high().map_err(|e| Error::Pin(e.into()))?;
+            let is_high_result = self.int_pin.is_high().map_err(|_| Error::Pin)?;
             let is_data_ready = is_high_result == self.int_is_data_ready_high;
 
             if is_data_ready {
@@ -244,9 +244,9 @@ where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug, 
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug, 
     INT: Wait, 
-    <INT as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug,
+    <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub async fn wait_for_data_ready_async(&mut self) -> Result<(), Error<E>> {
         let result = if self.int_is_data_ready_high {
@@ -254,7 +254,7 @@ where
         } else {
             self.int_pin.wait_for_low().await
         };
-        result.map_err(|e| Error::Pin(e.into()))?;
+        result.map_err(|_| Error::Pin)?;
         Ok(())
     }
 }
@@ -318,7 +318,7 @@ where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug, 
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug, 
 {
     #[inline]
     fn bind_platform(&mut self) {
@@ -333,7 +333,7 @@ where
         } else {
             self.reset_pin.set_low()
         };
-        result.map_err(|e| Error::Pin(e.into()))
+        result.map_err(|_| Error::Pin)
     }
 
     pub fn reset(&mut self) -> Result<(), Error<E>> {        
@@ -613,80 +613,75 @@ where
         let (status, value) = sys::wrappers::get_ranging_data(&mut self.stdev);
         match status { sys::VL53L5CX_STATUS_OK => Ok(value), s => Err(Error::Firmware(s.into())), }
     }
+
 }
 
 // --- Macro for Dynamic Platform Context ---
 #[macro_export]
 macro_rules! bind_platform_driver {
     ($i2c_type:ty, $delay_type:ty) => {
-        use $crate::VL53L5CX_Platform;
-        use $crate::Vl53l5cxComms;
-        use embedded_hal::i2c::I2c;
-        use embedded_hal::i2c::Operation;
-        use embedded_hal::delay::DelayNs;
-
         #[no_mangle]
         pub extern "C" fn vl53l5cx_platform_read(
-            p_platform: *mut VL53L5CX_Platform,
+            p_platform: *mut $crate::VL53L5CX_Platform,
             index: u16,
             p_values: *mut u8,
             size: u32,
         ) -> u8 {
             if p_platform.is_null() { return 255; }
             let platform = unsafe { &*p_platform };
-            let comms = unsafe { &mut *(platform.p_com as *mut Vl53l5cxComms<$i2c_type, $delay_type>) };
-            
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l5cxComms<$i2c_type, $delay_type>) };
+
             let data_slice = unsafe { core::slice::from_raw_parts_mut(p_values, size as usize) };
-            let index_bytes = index.to_be_bytes();
-            let address = platform.address as u8; 
-
-            match comms.i2c.write_read(address, &index_bytes, data_slice) {
-                Ok(_) => 0,
-                Err(_) => 1, 
-            }
-        }
-
-        #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_write(
-            p_platform: *mut VL53L5CX_Platform,
-            index: u16,
-            p_values: *mut u8,
-            size: u32,
-        ) -> u8 {
-            if p_platform.is_null() { return 255; }
-            let platform = unsafe { &*p_platform };
-            let comms = unsafe { &mut *(platform.p_com as *mut Vl53l5cxComms<$i2c_type, $delay_type>) };
-            
-            let data_slice = unsafe { core::slice::from_raw_parts(p_values, size as usize) };
             let index_bytes = index.to_be_bytes();
             let address = platform.address as u8;
 
-            let mut operations = [
-                Operation::Write(&index_bytes),
-                Operation::Write(data_slice),
-            ];
-            
-            match comms.i2c.transaction(address, &mut operations) {
+            match embedded_hal::i2c::I2c::write_read(&mut comms.i2c, address, &index_bytes, data_slice) {
                 Ok(_) => 0,
                 Err(_) => 1,
             }
         }
 
         #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_wait_ms(p_platform: *mut VL53L5CX_Platform, milliseconds: u32) -> u8 {
+        pub extern "C" fn vl53l5cx_platform_write(
+            p_platform: *mut $crate::VL53L5CX_Platform,
+            index: u16,
+            p_values: *mut u8,
+            size: u32,
+        ) -> u8 {
             if p_platform.is_null() { return 255; }
             let platform = unsafe { &*p_platform };
-            let comms = unsafe { &mut *(platform.p_com as *mut Vl53l5cxComms<$i2c_type, $delay_type>) };
-            
-            comms.delay.delay_ms(milliseconds);
-            0 
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l5cxComms<$i2c_type, $delay_type>) };
+
+            let data_slice = unsafe { core::slice::from_raw_parts(p_values, size as usize) };
+            let index_bytes = index.to_be_bytes();
+            let address = platform.address as u8;
+
+            let mut operations = [
+                embedded_hal::i2c::Operation::Write(&index_bytes),
+                embedded_hal::i2c::Operation::Write(data_slice),
+            ];
+
+            match embedded_hal::i2c::I2c::transaction(&mut comms.i2c, address, &mut operations) {
+                Ok(_) => 0,
+                Err(_) => 1,
+            }
         }
-        
-        #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_init(_p_platform: *mut VL53L5CX_Platform) -> u8 { 0 }
 
         #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_terminate(_p_platform: *mut VL53L5CX_Platform) -> u8 { 0 }
+        pub extern "C" fn vl53l5cx_platform_wait_ms(p_platform: *mut $crate::VL53L5CX_Platform, milliseconds: u32) -> u8 {
+            if p_platform.is_null() { return 255; }
+            let platform = unsafe { &*p_platform };
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l5cxComms<$i2c_type, $delay_type>) };
+
+            embedded_hal::delay::DelayNs::delay_ms(&mut comms.delay, milliseconds);
+            0
+        }
+
+        #[no_mangle]
+        pub extern "C" fn vl53l5cx_platform_init(_p_platform: *mut $crate::VL53L5CX_Platform) -> u8 { 0 }
+
+        #[no_mangle]
+        pub extern "C" fn vl53l5cx_platform_terminate(_p_platform: *mut $crate::VL53L5CX_Platform) -> u8 { 0 }
     };
 }
 
@@ -697,7 +692,7 @@ where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug,
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub fn motion_indicator_init(&mut self, motion_config: &mut sys::VL53L5CX_Motion_Configuration, resolution: Resolution) -> Result<(), Error<E>> {
         self.bind_platform();
@@ -756,7 +751,7 @@ where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug,
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub fn calibrate_xtalk(&mut self, reflectance_percent: u16, nb_samples: u8, distance_mm: u16) -> Result<(), Error<E>> {
         self.bind_platform();
@@ -818,7 +813,7 @@ where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: Into<E> + core::fmt::Debug,
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     fn scale_thresholds_for_read(thresholds: &mut [DetectionThreshold]) {
         for t in thresholds.iter_mut() {
