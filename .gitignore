@@ -39,3 +39,4 @@
 
 vl53l5cx-driver/target
 vl53l5cx-sys/target
+nucleo-f401re/target

@@ -1,0 +1,35 @@
+[package]
+name = "nucleo-f401re"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+stm32f4xx-hal = { version = "0.22", features = ["stm32f401"] }
+embedded-hal = "1.0"
+vl53l8cx-driver = { path = "../vl53l8cx-driver" }
+
+[dev-dependencies]
+embedded-test = { version = "0.7", default-features = false, features = ["semihosting", "defmt"] }
+
+[lib]
+test = false
+
+[[bin]]
+name = "basic_ranging"
+path = "src/bin/basic_ranging.rs"
+test = false
+
+[[test]]
+name = "sensor"
+path = "tests/sensor.rs"
+harness = false
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"

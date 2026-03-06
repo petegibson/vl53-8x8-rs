@@ -3,4 +3,7 @@ members = [
     "vl53l8cx-sys",
     "vl53l8cx-driver",
 ]
+exclude = [
+    "nucleo-f401re",
+]
 resolver = "2"
