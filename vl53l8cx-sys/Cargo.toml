@@ -1,12 +1,10 @@
 [package]
-name = "vl53l5cx-sys"
-version = "0.2.0-rc.1"
+name = "vl53l8cx-sys"
+version = "0.1.0"
 edition = "2021"
-description = "Low-level FFI bindings for the STMicroelectronics VL53L5CX Ultra Lite Driver (ULD)."
+description = "Low-level FFI bindings for the STMicroelectronics VL53L8CX Ultra Lite Driver (ULD)."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/wakefarm/vl53l5cx-driver"
-documentation = "https://docs.rs/vl53l5cx-driver"
-links = "vl53l5cx_uld"
+links = "vl53l8cx_uld"
 
 [dependencies]
 cty = "0.2"

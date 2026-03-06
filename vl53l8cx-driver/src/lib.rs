@@ -1,106 +1,107 @@
 #![no_std]
 /*!
-A platform-agnostic driver for the VL53L5CX Time-of-Flight sensor.
+A platform-agnostic driver for the VL53L8CX Time-of-Flight sensor.
 
 This driver is built on top of the `embedded-hal` traits and uses the official
-ST Microelectronics VL53L5CX ULD (Ultra Lite Driver) via the `vl53l5cx-sys` crate.
+ST Microelectronics VL53L8CX ULD (Ultra Lite Driver) via the `vl53l8cx-sys` crate.
 */
 
 use embedded_hal::delay::DelayNs;
 
 #[cfg(feature = "async-hal")]
-use embedded_hal_async::digital::Wait; 
-use embedded_hal::digital::InputPin; 
+use embedded_hal_async::digital::Wait;
+use embedded_hal::digital::InputPin;
 use embedded_hal::i2c::{I2c, SevenBitAddress};
 use embedded_hal::digital::OutputPin;
 
 // We import the sys crate internally but do NOT make it public.
-use vl53l5cx_sys as sys;
+use vl53l8cx_sys as sys;
 
 // --- Public Type Re-exports ---
-pub use sys::VL53L5CX_Platform; 
-pub use sys::VL53L5CX_ResultsData as ResultsData;
+pub use sys::VL53L8CX_Platform;
+pub use sys::VL53L8CX_ResultsData as ResultsData;
 
 #[cfg(any(feature = "motion", feature = "thresholds"))]
-pub use sys::VL53L5CX_Motion_Configuration as MotionConfiguration;
+pub use sys::VL53L8CX_Motion_Configuration as MotionConfiguration;
 
-/// The default I2C address of the VL53L5CX sensor.
+/// The default I2C address of the VL53L8CX sensor.
 pub const DEFAULT_ADDRESS: u8 = 0x29;
 
 /// The required buffer size for crosstalk calibration data (776 bytes).
 pub const XTALK_BUFFER_SIZE: usize = 776;
 
 #[cfg(feature = "thresholds")]
-use sys::VL53L5CX_NB_THRESHOLDS;
+use sys::VL53L8CX_NB_THRESHOLDS;
 
 // --- Idiomatic Rust Enums ---
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Resolution {
-    Res4x4 = sys::VL53L5CX_RESOLUTION_4X4,
-    Res8x8 = sys::VL53L5CX_RESOLUTION_8X8,
+    Res4x4 = sys::VL53L8CX_RESOLUTION_4X4,
+    Res8x8 = sys::VL53L8CX_RESOLUTION_8X8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TargetOrder {
-    Closest = sys::VL53L5CX_TARGET_ORDER_CLOSEST,
-    Strongest = sys::VL53L5CX_TARGET_ORDER_STRONGEST,
+    Closest = sys::VL53L8CX_TARGET_ORDER_CLOSEST,
+    Strongest = sys::VL53L8CX_TARGET_ORDER_STRONGEST,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RangingMode {
-    Continuous = sys::VL53L5CX_RANGING_MODE_CONTINUOUS,
-    Autonomous = sys::VL53L5CX_RANGING_MODE_AUTONOMOUS,
+    Continuous = sys::VL53L8CX_RANGING_MODE_CONTINUOUS,
+    Autonomous = sys::VL53L8CX_RANGING_MODE_AUTONOMOUS,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PowerMode {
-    Sleep = sys::VL53L5CX_POWER_MODE_SLEEP,
-    Wakeup = sys::VL53L5CX_POWER_MODE_WAKEUP,
+    Sleep = sys::VL53L8CX_POWER_MODE_SLEEP,
+    Wakeup = sys::VL53L8CX_POWER_MODE_WAKEUP,
+    DeepSleep = sys::VL53L8CX_POWER_MODE_DEEP_SLEEP,
 }
 
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ThresholdMeasurement {
-    DistanceMm = sys::VL53L5CX_DISTANCE_MM,
-    SignalPerSpadKcps = sys::VL53L5CX_SIGNAL_PER_SPAD_KCPS,
-    RangeSigmaMm = sys::VL53L5CX_RANGE_SIGMA_MM,
-    AmbientPerSpadKcps = sys::VL53L5CX_AMBIENT_PER_SPAD_KCPS,
-    NbTargetDetected = sys::VL53L5CX_NB_TARGET_DETECTED,
-    TargetStatus = sys::VL53L5CX_TARGET_STATUS,
-    NbSpadsEnabled = sys::VL53L5CX_NB_SPADS_ENABLED,
-    MotionIndicator = sys::VL53L5CX_MOTION_INDICATOR,
+    DistanceMm = sys::VL53L8CX_DISTANCE_MM,
+    SignalPerSpadKcps = sys::VL53L8CX_SIGNAL_PER_SPAD_KCPS,
+    RangeSigmaMm = sys::VL53L8CX_RANGE_SIGMA_MM,
+    AmbientPerSpadKcps = sys::VL53L8CX_AMBIENT_PER_SPAD_KCPS,
+    NbTargetDetected = sys::VL53L8CX_NB_TARGET_DETECTED,
+    TargetStatus = sys::VL53L8CX_TARGET_STATUS,
+    NbSpadsEnabled = sys::VL53L8CX_NB_SPADS_ENABLED,
+    MotionIndicator = sys::VL53L8CX_MOTION_INDICATOR,
 }
 
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ThresholdType {
-    InWindow = sys::VL53L5CX_IN_WINDOW,
-    OutOfWindow = sys::VL53L5CX_OUT_OF_WINDOW,
-    LessThanEqualMin = sys::VL53L5CX_LESS_THAN_EQUAL_MIN_CHECKER,
-    GreaterThanMax = sys::VL53L5CX_GREATER_THAN_MAX_CHECKER,
-    EqualMin = sys::VL53L5CX_EQUAL_MIN_CHECKER,
-    NotEqualMin = sys::VL53L5CX_NOT_EQUAL_MIN_CHECKER,
+    InWindow = sys::VL53L8CX_IN_WINDOW,
+    OutOfWindow = sys::VL53L8CX_OUT_OF_WINDOW,
+    LessThanEqualMin = sys::VL53L8CX_LESS_THAN_EQUAL_MIN_CHECKER,
+    GreaterThanMax = sys::VL53L8CX_GREATER_THAN_MAX_CHECKER,
+    EqualMin = sys::VL53L8CX_EQUAL_MIN_CHECKER,
+    NotEqualMin = sys::VL53L8CX_NOT_EQUAL_MIN_CHECKER,
 }
 
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ThresholdOperation {
-    Or = sys::VL53L5CX_OPERATION_OR,
-    And = sys::VL53L5CX_OPERATION_AND,
-    None = sys::VL53L5CX_OPERATION_NONE,
+    Or = sys::VL53L8CX_OPERATION_OR,
+    And = sys::VL53L8CX_OPERATION_AND,
+    None = sys::VL53L8CX_OPERATION_NONE,
 }
 
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy)]
-#[repr(C)] 
+#[repr(C)]
 pub struct DetectionThreshold {
     pub low_threshold: i32,
     pub high_threshold: i32,
@@ -126,8 +127,9 @@ impl embedded_hal::digital::OutputPin for NoPin {
 pub enum FirmwareError {
     Timeout,
     CorruptedFrame,
-    CrcChecksumFailed,
+    LaserSafety,
     XtalkFailed,
+    FwChecksumFail,
     McuError,
     InvalidParam,
     Unknown(u8),
@@ -136,12 +138,13 @@ pub enum FirmwareError {
 impl From<u8> for FirmwareError {
     fn from(code: u8) -> Self {
         match code {
-            sys::VL53L5CX_STATUS_TIMEOUT_ERROR => FirmwareError::Timeout,
-            sys::VL53L5CX_STATUS_CORRUPTED_FRAME => FirmwareError::CorruptedFrame,
-            sys::VL53L5CX_STATUS_CRC_CSUM_FAILED => FirmwareError::CrcChecksumFailed,
-            sys::VL53L5CX_STATUS_XTALK_FAILED => FirmwareError::XtalkFailed,
-            sys::VL53L5CX_MCU_ERROR => FirmwareError::McuError,
-            sys::VL53L5CX_STATUS_INVALID_PARAM => FirmwareError::InvalidParam,
+            sys::VL53L8CX_STATUS_TIMEOUT_ERROR => FirmwareError::Timeout,
+            sys::VL53L8CX_STATUS_CORRUPTED_FRAME => FirmwareError::CorruptedFrame,
+            sys::VL53L8CX_STATUS_LASER_SAFETY => FirmwareError::LaserSafety,
+            sys::VL53L8CX_STATUS_XTALK_FAILED => FirmwareError::XtalkFailed,
+            sys::VL53L8CX_STATUS_FW_CHECKSUM_FAIL => FirmwareError::FwChecksumFail,
+            sys::VL53L8CX_MCU_ERROR => FirmwareError::McuError,
+            sys::VL53L8CX_STATUS_INVALID_PARAM => FirmwareError::InvalidParam,
             c => FirmwareError::Unknown(c),
         }
     }
@@ -181,48 +184,48 @@ impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
 }
 
 #[repr(C)]
-pub struct Vl53l5cxComms<I2C, D> {
+pub struct Vl53l8cxComms<I2C, D> {
     pub i2c: I2C,
     pub delay: D,
 }
 
-pub struct Vl53l5cx<I2C, D, RST = NoPin, INT = NoPin> {
-    pub comms: Vl53l5cxComms<I2C, D>,
+pub struct Vl53l8cx<I2C, D, RST = NoPin, INT = NoPin> {
+    pub comms: Vl53l8cxComms<I2C, D>,
     address: SevenBitAddress,
     reset_pin: RST,
     int_pin: INT,
     has_reset: bool,
-    lp_is_reset_high: bool, 
-    int_is_data_ready_high: bool,   
-    stdev: sys::VL53L5CX_Configuration,
+    lp_is_reset_high: bool,
+    int_is_data_ready_high: bool,
+    stdev: sys::VL53L8CX_Configuration,
 }
 
-impl<I2C, D> Vl53l5cx<I2C, D, NoPin, NoPin>
+impl<I2C, D> Vl53l8cx<I2C, D, NoPin, NoPin>
 where
     I2C: I2c,
     D: DelayNs,
 {
     pub fn new(i2c: I2C, delay: D) -> Self {
         Self {
-            comms: Vl53l5cxComms { i2c, delay },
+            comms: Vl53l8cxComms { i2c, delay },
             address: DEFAULT_ADDRESS,
             reset_pin: NoPin,
             int_pin: NoPin,
             has_reset: false,
-            lp_is_reset_high: false, 
-            int_is_data_ready_high: false,   
+            lp_is_reset_high: false,
+            int_is_data_ready_high: false,
             stdev: unsafe { core::mem::zeroed() },
         }
     }
 }
 
-impl<I2C, D, RST, INT, E> Vl53l5cx<I2C, D, RST, INT>
+impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
 where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
-    INT: InputPin, 
+    INT: InputPin,
     <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub fn wait_for_data_ready_blocking(&mut self) -> Result<(), Error<E>> {
@@ -239,13 +242,13 @@ where
 }
 
 #[cfg(feature = "async-hal")]
-impl<I2C, D, RST, INT, E> Vl53l5cx<I2C, D, RST, INT>
+impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
 where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug, 
-    INT: Wait, 
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
+    INT: Wait,
     <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub async fn wait_for_data_ready_async(&mut self) -> Result<(), Error<E>> {
@@ -259,35 +262,35 @@ where
     }
 }
 
-impl<I2C, D, RST, INT> Vl53l5cx<I2C, D, RST, INT> {
-    pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Vl53l5cx<I2C, D, RstNew, INT> {
-        Vl53l5cx {
+impl<I2C, D, RST, INT> Vl53l8cx<I2C, D, RST, INT> {
+    pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<I2C, D, RstNew, INT> {
+        Vl53l8cx {
             comms: self.comms,
             address: self.address,
             reset_pin,
             int_pin: self.int_pin,
             has_reset: true,
-            lp_is_reset_high: false, 
+            lp_is_reset_high: false,
             int_is_data_ready_high: self.int_is_data_ready_high,
             stdev: self.stdev,
         }
     }
 
-    pub fn with_reset_pin_active_high<RstNew>(self, reset_pin: RstNew) -> Vl53l5cx<I2C, D, RstNew, INT> {
-        Vl53l5cx {
+    pub fn with_reset_pin_active_high<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<I2C, D, RstNew, INT> {
+        Vl53l8cx {
             comms: self.comms,
             address: self.address,
             reset_pin,
             int_pin: self.int_pin,
             has_reset: true,
-            lp_is_reset_high: true, 
+            lp_is_reset_high: true,
             int_is_data_ready_high: self.int_is_data_ready_high,
             stdev: self.stdev,
         }
     }
 
-    pub fn with_interrupt_pin_active_low<IntNew>(self, int_pin: IntNew) -> Vl53l5cx<I2C, D, RST, IntNew> {
-        Vl53l5cx {
+    pub fn with_interrupt_pin_active_low<IntNew>(self, int_pin: IntNew) -> Vl53l8cx<I2C, D, RST, IntNew> {
+        Vl53l8cx {
             comms: self.comms,
             address: self.address,
             reset_pin: self.reset_pin,
@@ -299,8 +302,8 @@ impl<I2C, D, RST, INT> Vl53l5cx<I2C, D, RST, INT> {
         }
     }
 
-    pub fn with_interrupt_pin_active_high<IntNew>(self, int_pin: IntNew) -> Vl53l5cx<I2C, D, RST, IntNew> {
-        Vl53l5cx {
+    pub fn with_interrupt_pin_active_high<IntNew>(self, int_pin: IntNew) -> Vl53l8cx<I2C, D, RST, IntNew> {
+        Vl53l8cx {
             comms: self.comms,
             address: self.address,
             reset_pin: self.reset_pin,
@@ -313,12 +316,12 @@ impl<I2C, D, RST, INT> Vl53l5cx<I2C, D, RST, INT> {
     }
 }
 
-impl<I2C, D, RST, INT, E> Vl53l5cx<I2C, D, RST, INT>
+impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
 where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug, 
+    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     #[inline]
     fn bind_platform(&mut self) {
@@ -336,7 +339,7 @@ where
         result.map_err(|_| Error::Pin)
     }
 
-    pub fn reset(&mut self) -> Result<(), Error<E>> {        
+    pub fn reset(&mut self) -> Result<(), Error<E>> {
         if !self.has_reset {
             return Err(Error::PinMissing);
         }
@@ -350,14 +353,14 @@ where
         if !self.has_reset {
             return Err(Error::PinMissing);
         }
-        self.set_reset_state(true)?; 
+        self.set_reset_state(true)?;
         self.comms.delay.delay_ms(2);
-        self.set_reset_state(false)?; 
+        self.set_reset_state(false)?;
         self.comms.delay.delay_ms(2);
 
         self.bind_platform();
         let status = unsafe {
-            sys::vl53l5cx_set_i2c_address(&mut self.stdev, new_address as u16)
+            sys::vl53l8cx_set_i2c_address(&mut self.stdev, new_address as u16)
         };
 
         if status != 0 {
@@ -372,7 +375,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::start_ranging(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -381,7 +384,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::stop_ranging(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -390,7 +393,7 @@ where
         self.bind_platform();
         let (status, is_ready) = sys::wrappers::check_data_ready(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(is_ready != 0),
+            sys::VL53L8CX_STATUS_OK => Ok(is_ready != 0),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -399,7 +402,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_resolution(&mut self.stdev, resolution as u8);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -408,7 +411,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_ranging_frequency_hz(&mut self.stdev, frequency_hz);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -417,7 +420,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_ranging_mode(&mut self.stdev, mode as u8);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -426,7 +429,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_integration_time_ms(&mut self.stdev, time_ms);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -435,7 +438,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_sharpener_percent(&mut self.stdev, percent);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -444,7 +447,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_target_order(&mut self.stdev, order as u8);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -453,7 +456,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_power_mode(&mut self.stdev, mode as u8);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -461,10 +464,10 @@ where
     pub fn get_resolution(&mut self) -> Result<Resolution, Error<E>> {
         self.bind_platform();
         let mut resolution: u8 = 0;
-        let status = unsafe { sys::vl53l5cx_get_resolution(&mut self.stdev, &mut resolution) };
+        let status = unsafe { sys::vl53l8cx_get_resolution(&mut self.stdev, &mut resolution) };
         match status {
-            sys::VL53L5CX_STATUS_OK => {
-                if resolution == sys::VL53L5CX_RESOLUTION_8X8 {
+            sys::VL53L8CX_STATUS_OK => {
+                if resolution == sys::VL53L8CX_RESOLUTION_8X8 {
                      Ok(Resolution::Res8x8)
                 } else {
                      Ok(Resolution::Res4x4)
@@ -477,9 +480,9 @@ where
     pub fn get_ranging_frequency_hz(&mut self) -> Result<u8, Error<E>> {
         self.bind_platform();
         let mut freq: u8 = 0;
-        let status = unsafe { sys::vl53l5cx_get_ranging_frequency_hz(&mut self.stdev, &mut freq) };
+        let status = unsafe { sys::vl53l8cx_get_ranging_frequency_hz(&mut self.stdev, &mut freq) };
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(freq),
+            sys::VL53L8CX_STATUS_OK => Ok(freq),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -488,7 +491,7 @@ where
         self.bind_platform();
         let (status, time) = sys::wrappers::get_integration_time_ms(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(time),
+            sys::VL53L8CX_STATUS_OK => Ok(time),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -497,8 +500,8 @@ where
         self.bind_platform();
         let (status, mode) = sys::wrappers::get_ranging_mode(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => {
-                if mode == sys::VL53L5CX_RANGING_MODE_CONTINUOUS {
+            sys::VL53L8CX_STATUS_OK => {
+                if mode == sys::VL53L8CX_RANGING_MODE_CONTINUOUS {
                     Ok(RangingMode::Continuous)
                 } else {
                     Ok(RangingMode::Autonomous)
@@ -512,7 +515,7 @@ where
         self.bind_platform();
         let (status, percent) = sys::wrappers::get_sharpener_percent(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(percent),
+            sys::VL53L8CX_STATUS_OK => Ok(percent),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -521,8 +524,8 @@ where
         self.bind_platform();
         let (status, order) = sys::wrappers::get_target_order(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => {
-                if order == sys::VL53L5CX_TARGET_ORDER_STRONGEST {
+            sys::VL53L8CX_STATUS_OK => {
+                if order == sys::VL53L8CX_TARGET_ORDER_STRONGEST {
                     Ok(TargetOrder::Strongest)
                 } else {
                     Ok(TargetOrder::Closest)
@@ -536,9 +539,11 @@ where
         self.bind_platform();
         let (status, mode) = sys::wrappers::get_power_mode(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => {
-                 if mode == sys::VL53L5CX_POWER_MODE_WAKEUP {
+            sys::VL53L8CX_STATUS_OK => {
+                if mode == sys::VL53L8CX_POWER_MODE_WAKEUP {
                     Ok(PowerMode::Wakeup)
+                } else if mode == sys::VL53L8CX_POWER_MODE_DEEP_SLEEP {
+                    Ok(PowerMode::DeepSleep)
                 } else {
                     Ok(PowerMode::Sleep)
                 }
@@ -551,25 +556,7 @@ where
         self.bind_platform();
         let (status, count) = sys::wrappers::get_vhv_repeat_count(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(count),
-            s => Err(Error::Firmware(s.into())),
-        }
-    }
-
-    pub fn enable_internal_cp(&mut self) -> Result<(), Error<E>> {
-        self.bind_platform();
-        let status = sys::wrappers::enable_internal_cp(&mut self.stdev);
-        match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
-            s => Err(Error::Firmware(s.into())),
-        }
-    }
-
-    pub fn disable_internal_cp(&mut self) -> Result<(), Error<E>> {
-        self.bind_platform();
-        let status = sys::wrappers::disable_internal_cp(&mut self.stdev);
-        match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(count),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -578,24 +565,43 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_vhv_repeat_count(&mut self.stdev, count);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
+            s => Err(Error::Firmware(s.into())),
+        }
+    }
+
+    pub fn get_external_sync_pin_enable(&mut self) -> Result<bool, Error<E>> {
+        self.bind_platform();
+        let (status, enabled) = sys::wrappers::get_external_sync_pin_enable(&mut self.stdev);
+        match status {
+            sys::VL53L8CX_STATUS_OK => Ok(enabled != 0),
+            s => Err(Error::Firmware(s.into())),
+        }
+    }
+
+    pub fn set_external_sync_pin_enable(&mut self, enabled: bool) -> Result<(), Error<E>> {
+        self.bind_platform();
+        let val = if enabled { 1 } else { 0 };
+        let status = sys::wrappers::set_external_sync_pin_enable(&mut self.stdev, val);
+        match status {
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
 
     pub fn init(&mut self) -> Result<(), Error<E>> {
-        self.set_reset_state(false)?; 
+        self.set_reset_state(false)?;
         self.comms.delay.delay_ms(2);
 
         self.stdev.platform.address = self.address as u16;
-        self.bind_platform(); 
+        self.bind_platform();
 
         if !self.is_alive()? {
             return Err(Error::NotAlive);
         }
 
-        self.bind_platform(); 
-        let status = unsafe { sys::vl53l5cx_init(&mut self.stdev) };
+        self.bind_platform();
+        let status = unsafe { sys::vl53l8cx_init(&mut self.stdev) };
         if status != 0 {
             return Err(Error::Firmware(status.into()));
         }
@@ -605,13 +611,13 @@ where
     pub fn is_alive(&mut self) -> Result<bool, Error<E>> {
         self.bind_platform();
         let (status, is_alive) = sys::wrappers::is_alive(&mut self.stdev);
-        match status { sys::VL53L5CX_STATUS_OK => Ok(is_alive != 0), s => Err(Error::Firmware(s.into())), }
+        match status { sys::VL53L8CX_STATUS_OK => Ok(is_alive != 0), s => Err(Error::Firmware(s.into())), }
     }
 
-    pub fn get_ranging_data(&mut self) -> Result<sys::VL53L5CX_ResultsData, Error<E>> {
+    pub fn get_ranging_data(&mut self) -> Result<sys::VL53L8CX_ResultsData, Error<E>> {
         self.bind_platform();
         let (status, value) = sys::wrappers::get_ranging_data(&mut self.stdev);
-        match status { sys::VL53L5CX_STATUS_OK => Ok(value), s => Err(Error::Firmware(s.into())), }
+        match status { sys::VL53L8CX_STATUS_OK => Ok(value), s => Err(Error::Firmware(s.into())), }
     }
 
 }
@@ -621,15 +627,15 @@ where
 macro_rules! bind_platform_driver {
     ($i2c_type:ty, $delay_type:ty) => {
         #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_read(
-            p_platform: *mut $crate::VL53L5CX_Platform,
+        pub extern "C" fn vl53l8cx_platform_read(
+            p_platform: *mut $crate::VL53L8CX_Platform,
             index: u16,
             p_values: *mut u8,
             size: u32,
         ) -> u8 {
             if p_platform.is_null() { return 255; }
             let platform = unsafe { &*p_platform };
-            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l5cxComms<$i2c_type, $delay_type>) };
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l8cxComms<$i2c_type, $delay_type>) };
 
             let data_slice = unsafe { core::slice::from_raw_parts_mut(p_values, size as usize) };
             let index_bytes = index.to_be_bytes();
@@ -642,15 +648,15 @@ macro_rules! bind_platform_driver {
         }
 
         #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_write(
-            p_platform: *mut $crate::VL53L5CX_Platform,
+        pub extern "C" fn vl53l8cx_platform_write(
+            p_platform: *mut $crate::VL53L8CX_Platform,
             index: u16,
             p_values: *mut u8,
             size: u32,
         ) -> u8 {
             if p_platform.is_null() { return 255; }
             let platform = unsafe { &*p_platform };
-            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l5cxComms<$i2c_type, $delay_type>) };
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l8cxComms<$i2c_type, $delay_type>) };
 
             let data_slice = unsafe { core::slice::from_raw_parts(p_values, size as usize) };
             let index_bytes = index.to_be_bytes();
@@ -668,59 +674,59 @@ macro_rules! bind_platform_driver {
         }
 
         #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_wait_ms(p_platform: *mut $crate::VL53L5CX_Platform, milliseconds: u32) -> u8 {
+        pub extern "C" fn vl53l8cx_platform_wait_ms(p_platform: *mut $crate::VL53L8CX_Platform, milliseconds: u32) -> u8 {
             if p_platform.is_null() { return 255; }
             let platform = unsafe { &*p_platform };
-            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l5cxComms<$i2c_type, $delay_type>) };
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l8cxComms<$i2c_type, $delay_type>) };
 
             embedded_hal::delay::DelayNs::delay_ms(&mut comms.delay, milliseconds);
             0
         }
 
         #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_init(_p_platform: *mut $crate::VL53L5CX_Platform) -> u8 { 0 }
+        pub extern "C" fn vl53l8cx_platform_init(_p_platform: *mut $crate::VL53L8CX_Platform) -> u8 { 0 }
 
         #[no_mangle]
-        pub extern "C" fn vl53l5cx_platform_terminate(_p_platform: *mut $crate::VL53L5CX_Platform) -> u8 { 0 }
+        pub extern "C" fn vl53l8cx_platform_terminate(_p_platform: *mut $crate::VL53L8CX_Platform) -> u8 { 0 }
     };
 }
 
 
 #[cfg(any(feature = "motion", feature = "thresholds"))]
-impl<I2C, D, RST, INT, E> Vl53l5cx<I2C, D, RST, INT>
+impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
 where
     I2C: I2c<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
-    pub fn motion_indicator_init(&mut self, motion_config: &mut sys::VL53L5CX_Motion_Configuration, resolution: Resolution) -> Result<(), Error<E>> {
+    pub fn motion_indicator_init(&mut self, motion_config: &mut sys::VL53L8CX_Motion_Configuration, resolution: Resolution) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::motion_indicator_init(&mut self.stdev, motion_config, resolution as u8);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
 
-    pub fn motion_indicator_set_distance_motion(&mut self, motion_config: &mut sys::VL53L5CX_Motion_Configuration, min_distance_mm: u16, max_distance_mm: u16) -> Result<(), Error<E>> {
+    pub fn motion_indicator_set_distance_motion(&mut self, motion_config: &mut sys::VL53L8CX_Motion_Configuration, min_distance_mm: u16, max_distance_mm: u16) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::motion_indicator_set_distance_motion(&mut self.stdev, motion_config, min_distance_mm, max_distance_mm);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
 
     pub fn motion_indicator_set_resolution(
         &mut self,
-        motion_config: &mut sys::VL53L5CX_Motion_Configuration,
+        motion_config: &mut sys::VL53L8CX_Motion_Configuration,
         resolution: Resolution,
     ) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::motion_indicator_set_resolution(&mut self.stdev, motion_config, resolution as u8);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -729,7 +735,7 @@ where
         self.bind_platform();
         let (status, enabled) = sys::wrappers::get_detection_thresholds_enable(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(enabled == 1),
+            sys::VL53L8CX_STATUS_OK => Ok(enabled == 1),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -739,14 +745,14 @@ where
         let val = if enabled { 1 } else { 0 };
         let status = sys::wrappers::set_detection_thresholds_enable(&mut self.stdev, val);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
 }
 
 #[cfg(feature = "xtalk")]
-impl<I2C, D, RST, INT, E> Vl53l5cx<I2C, D, RST, INT>
+impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
 where
     I2C: I2c<Error = E>,
     D: DelayNs,
@@ -757,7 +763,7 @@ where
         self.bind_platform();
         let status = sys::wrappers::calibrate_xtalk(&mut self.stdev, reflectance_percent, nb_samples, distance_mm);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -766,7 +772,7 @@ where
         self.bind_platform();
         let (status, margin) = sys::wrappers::get_xtalk_margin(&mut self.stdev);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(margin),
+            sys::VL53L8CX_STATUS_OK => Ok(margin),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -775,20 +781,20 @@ where
         self.bind_platform();
         let status = sys::wrappers::set_xtalk_margin(&mut self.stdev, margin);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
-    
+
     pub fn get_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<E>> {
         // Use local constant for buffer size
         if buffer.len() < XTALK_BUFFER_SIZE {
-             return Err(Error::Firmware(sys::VL53L5CX_STATUS_INVALID_PARAM.into()));
+             return Err(Error::Firmware(sys::VL53L8CX_STATUS_INVALID_PARAM.into()));
         }
         self.bind_platform();
         let status = sys::wrappers::get_caldata_xtalk(&mut self.stdev, buffer.as_mut_ptr());
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
@@ -796,19 +802,19 @@ where
     pub fn set_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<E>> {
          // Use local constant for buffer size
          if buffer.len() < XTALK_BUFFER_SIZE {
-             return Err(Error::Firmware(sys::VL53L5CX_STATUS_INVALID_PARAM.into()));
+             return Err(Error::Firmware(sys::VL53L8CX_STATUS_INVALID_PARAM.into()));
         }
         self.bind_platform();
         let status = sys::wrappers::set_caldata_xtalk(&mut self.stdev, buffer.as_mut_ptr());
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }
 }
 
 #[cfg(feature = "thresholds")]
-impl<I2C, D, RST, INT, E> Vl53l5cx<I2C, D, RST, INT>
+impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
 where
     I2C: I2c<Error = E>,
     D: DelayNs,
@@ -849,17 +855,17 @@ where
         }
     }
 
-    pub fn get_detection_thresholds(&mut self) -> Result<[DetectionThreshold; VL53L5CX_NB_THRESHOLDS as usize], Error<E>> {
+    pub fn get_detection_thresholds(&mut self) -> Result<[DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize], Error<E>> {
         self.bind_platform();
-        let mut raw_thresholds: [sys::VL53L5CX_DetectionThresholds; VL53L5CX_NB_THRESHOLDS as usize] = unsafe { core::mem::zeroed() };
-        let ptr = raw_thresholds.as_mut_ptr() as *mut sys::VL53L5CX_DetectionThresholds;
-        
+        let mut raw_thresholds: [sys::VL53L8CX_DetectionThresholds; VL53L8CX_NB_THRESHOLDS as usize] = unsafe { core::mem::zeroed() };
+        let ptr = raw_thresholds.as_mut_ptr() as *mut sys::VL53L8CX_DetectionThresholds;
+
         let status = sys::wrappers::get_detection_thresholds(&mut self.stdev, ptr);
-        if status != sys::VL53L5CX_STATUS_OK {
+        if status != sys::VL53L8CX_STATUS_OK {
             return Err(Error::Firmware(status.into()));
         }
 
-        let mut rust_thresholds: [DetectionThreshold; VL53L5CX_NB_THRESHOLDS as usize] = unsafe {
+        let mut rust_thresholds: [DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize] = unsafe {
             core::mem::transmute(raw_thresholds)
         };
 
@@ -868,18 +874,18 @@ where
         Ok(rust_thresholds)
     }
 
-    pub fn set_detection_thresholds(&mut self, mut thresholds: [DetectionThreshold; VL53L5CX_NB_THRESHOLDS as usize]) -> Result<(), Error<E>> {
+    pub fn set_detection_thresholds(&mut self, mut thresholds: [DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize]) -> Result<(), Error<E>> {
         self.bind_platform();
         Self::scale_thresholds_for_write(&mut thresholds);
 
-        let raw_thresholds: [sys::VL53L5CX_DetectionThresholds; VL53L5CX_NB_THRESHOLDS as usize] = unsafe {
+        let raw_thresholds: [sys::VL53L8CX_DetectionThresholds; VL53L8CX_NB_THRESHOLDS as usize] = unsafe {
             core::mem::transmute(thresholds)
         };
-        let ptr = raw_thresholds.as_ptr() as *mut sys::VL53L5CX_DetectionThresholds;
+        let ptr = raw_thresholds.as_ptr() as *mut sys::VL53L8CX_DetectionThresholds;
 
         let status = sys::wrappers::set_detection_thresholds(&mut self.stdev, ptr);
         match status {
-            sys::VL53L5CX_STATUS_OK => Ok(()),
+            sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),
         }
     }

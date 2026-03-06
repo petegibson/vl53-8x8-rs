@@ -7,10 +7,10 @@ fn main() {
     println!("cargo:rustc-check-cfg=cfg(motion_or_thresholds)");
 
     // Directory containing the ST ULD source files
-    let driver_dir = PathBuf::from("src").join("VL53L5CX_ULD_API");
+    let driver_dir = PathBuf::from("src").join("VL53L8CX_ULD_API");
 
     // Start with the base API file, which is always required.
-    let mut c_sources = vec![driver_dir.join("src").join("vl53l5cx_api.c")];
+    let mut c_sources = vec![driver_dir.join("src").join("vl53l8cx_api.c")];
     let mut cc_build = cc::Build::new();
 
     // Determine the number of targets based on active features.
@@ -30,71 +30,71 @@ fn main() {
     // --- Feature: xtalk ---
     if env::var("CARGO_FEATURE_XTALK").is_ok() {
         println!("cargo:rustc-cfg=feature=\"xtalk\"");
-        c_sources.push(driver_dir.join("src").join("vl53l5cx_plugin_xtalk.c"));
-        cc_build.define("VL53L5CX_USE_XTALK", "1");
-        bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_USE_XTALK=1");
+        c_sources.push(driver_dir.join("src").join("vl53l8cx_plugin_xtalk.c"));
+        cc_build.define("VL53L8CX_USE_XTALK", "1");
+        bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_USE_XTALK=1");
     }
 
     // --- Feature: motion & thresholds ---
     // The motion indicator plugin contains code for both motion and detection thresholds.
     if env::var("CARGO_FEATURE_MOTION").is_ok() || env::var("CARGO_FEATURE_THRESHOLDS").is_ok() {
         println!("cargo:rustc-cfg=motion_or_thresholds");
-        c_sources.push(driver_dir.join("src").join("vl53l5cx_plugin_motion_indicator.c"));
-        cc_build.define("VL53L5CX_USE_MOTION_INDICATOR", "1");
-        bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_USE_MOTION_INDICATOR=1");
+        c_sources.push(driver_dir.join("src").join("vl53l8cx_plugin_motion_indicator.c"));
+        cc_build.define("VL53L8CX_USE_MOTION_INDICATOR", "1");
+        bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_USE_MOTION_INDICATOR=1");
     }
 
     // If the motion feature is disabled, we must tell BOTH the C compiler and
-    // bindgen to remove the `motion_indicator` field from VL53L5CX_ResultsData.
-    // This also affects VL53L5CX_MAX_RESULTS_SIZE and thus temp_buffer size —
+    // bindgen to remove the `motion_indicator` field from VL53L8CX_ResultsData.
+    // This also affects VL53L8CX_MAX_RESULTS_SIZE and thus temp_buffer size —
     // a mismatch causes buffer overflows at runtime.
     if env::var("CARGO_FEATURE_MOTION").is_err() {
-        cc_build.define("VL53L5CX_DISABLE_MOTION_INDICATOR", "1");
-        bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_MOTION_INDICATOR");
+        cc_build.define("VL53L8CX_DISABLE_MOTION_INDICATOR", "1");
+        bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_MOTION_INDICATOR");
     }
 
 // --- Feature: Raw Firmware Format ---
 if env::var("CARGO_FEATURE_RAW_FORMAT").is_ok() {
-    cc_build.define("VL53L5CX_USE_RAW_FORMAT", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_USE_RAW_FORMAT=1");
+    cc_build.define("VL53L8CX_USE_RAW_FORMAT", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_USE_RAW_FORMAT=1");
 }
 
-// --- Output Disablement Features for Size Optimization (maps to VL53L5CX_DISABLE_... macros) ---
+// --- Output Disablement Features for Size Optimization (maps to VL53L8CX_DISABLE_... macros) ---
 if env::var("CARGO_FEATURE_DISABLE_AMBIENT").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_AMBIENT_PER_SPAD", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_AMBIENT_PER_SPAD");
+    cc_build.define("VL53L8CX_DISABLE_AMBIENT_PER_SPAD", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_AMBIENT_PER_SPAD");
 }
 if env::var("CARGO_FEATURE_DISABLE_SPADS").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_NB_SPADS_ENABLED", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_NB_SPADS_ENABLED");
+    cc_build.define("VL53L8CX_DISABLE_NB_SPADS_ENABLED", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_NB_SPADS_ENABLED");
 }
 if env::var("CARGO_FEATURE_DISABLE_NB_TARGETS").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_NB_TARGET_DETECTED", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_NB_TARGET_DETECTED");
+    cc_build.define("VL53L8CX_DISABLE_NB_TARGET_DETECTED", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_NB_TARGET_DETECTED");
 }
 if env::var("CARGO_FEATURE_DISABLE_SIGNAL").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_SIGNAL_PER_SPAD", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_SIGNAL_PER_SPAD");
+    cc_build.define("VL53L8CX_DISABLE_SIGNAL_PER_SPAD", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_SIGNAL_PER_SPAD");
 }
 if env::var("CARGO_FEATURE_DISABLE_RANGE_SIGMA").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_RANGE_SIGMA_MM", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_RANGE_SIGMA_MM");
+    cc_build.define("VL53L8CX_DISABLE_RANGE_SIGMA_MM", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_RANGE_SIGMA_MM");
 }
 if env::var("CARGO_FEATURE_DISABLE_DISTANCE").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_DISTANCE_MM", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_DISTANCE_MM");
+    cc_build.define("VL53L8CX_DISABLE_DISTANCE_MM", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_DISTANCE_MM");
 }
 if env::var("CARGO_FEATURE_DISABLE_TARGET_STATUS").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_TARGET_STATUS", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_TARGET_STATUS");
+    cc_build.define("VL53L8CX_DISABLE_TARGET_STATUS", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_TARGET_STATUS");
 }
 if env::var("CARGO_FEATURE_DISABLE_REFLECTANCE").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_REFLECTANCE_PERCENT", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_REFLECTANCE_PERCENT");
+    cc_build.define("VL53L8CX_DISABLE_REFLECTANCE_PERCENT", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_REFLECTANCE_PERCENT");
 }
 if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
-    cc_build.define("VL53L5CX_DISABLE_MOTION_INDICATOR", "1");
-    bindgen_builder = bindgen_builder.clang_arg("-DVL53L5CX_DISABLE_MOTION_INDICATOR");
+    cc_build.define("VL53L8CX_DISABLE_MOTION_INDICATOR", "1");
+    bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_DISABLE_MOTION_INDICATOR");
 }
 
     // --- Configuration for Cross-Compilation ---
@@ -159,25 +159,25 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
         .files(c_sources)
         .include(driver_dir.join("inc"))
         // Configure driver settings.
-        .define("VL53L5CX_NB_TARGET_PER_ZONE", nb_targets)
+        .define("VL53L8CX_NB_TARGET_PER_ZONE", nb_targets)
         // This tells the C driver to use the high-level platform functions.
         .define("USE_ULP_PLATFORM", "1")
-        .compile("vl53l5cx_driver");
+        .compile("vl53l8cx_driver");
 
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=src/VL53L5CX_ULD_API/inc/vl53l5cx_api.h");
+    println!("cargo:rerun-if-changed=src/VL53L8CX_ULD_API/inc/vl53l8cx_api.h");
 
     // Generate the Rust bindings using bindgen
     let bindings = bindgen_builder
-        .header(driver_dir.join("inc").join("vl53l5cx_api.h").to_str().unwrap())
+        .header(driver_dir.join("inc").join("vl53l8cx_api.h").to_str().unwrap())
         // Explicitly include plugin headers so bindgen can find all types.
-        .header(driver_dir.join("inc").join("vl53l5cx_plugin_xtalk.h").to_str().unwrap())
-        .header(driver_dir.join("inc").join("vl53l5cx_plugin_motion_indicator.h").to_str().unwrap())
-        .header(driver_dir.join("inc").join("vl53l5cx_plugin_detection_thresholds.h").to_str().unwrap())
+        .header(driver_dir.join("inc").join("vl53l8cx_plugin_xtalk.h").to_str().unwrap())
+        .header(driver_dir.join("inc").join("vl53l8cx_plugin_motion_indicator.h").to_str().unwrap())
+        .header(driver_dir.join("inc").join("vl53l8cx_plugin_detection_thresholds.h").to_str().unwrap())
         // Add the include path for bindgen's clang parser.
         .clang_arg(format!("-I{}", driver_dir.join("inc").display()))
         // Also define the macros for bindgen's C parser.
-        .clang_arg(format!("-DVL53L5CX_NB_TARGET_PER_ZONE={}", nb_targets))
+        .clang_arg(format!("-DVL53L8CX_NB_TARGET_PER_ZONE={}", nb_targets))
         .clang_arg("-DUSE_ULP_PLATFORM=1")
         // Generate no_std compatible bindings
         .use_core()
@@ -185,10 +185,10 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         // Whitelist the functions, types, and constants we want to use.
-        .allowlist_function("vl53l5cx_.*")
-        .allowlist_type("VL53L5CX_.*")
-        .allowlist_var("VL53L5CX_.*")
-        .allowlist_var("VL53L5CX_XTALK_BUFFER_SIZE") // Ensure this const is always generated
+        .allowlist_function("vl53l8cx_.*")
+        .allowlist_type("VL53L8CX_.*")
+        .allowlist_var("VL53L8CX_.*")
+        .allowlist_var("VL53L8CX_XTALK_BUFFER_SIZE") // Ensure this const is always generated
         .generate()
         .expect("Unable to generate bindings");
 

@@ -1,15 +1,13 @@
 [package]
-name = "vl53l5cx-driver"
-version = "0.2.0-rc.1"
+name = "vl53l8cx-driver"
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "A platform-agnostic Rust driver for the STMicroelectronics VL53L5CX Time-of-Flight sensor."
-repository = "https://github.com/wakefarm/vl53l5cx-driver"
-documentation = "https://docs.rs/vl53l5cx-driver"
+description = "A platform-agnostic Rust driver for the STMicroelectronics VL53L8CX Time-of-Flight sensor."
 
 [dependencies]
 embedded-hal = "1.0.0" # Using the stable 1.0 version of the hardware abstraction layer.
-vl53l5cx-sys = { path = "../vl53l5cx-sys", version = "0.2.0-rc.1" }
+vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
 
 # Make i2cdev optional
 i2cdev = { version = "0.6.2", optional = true }
@@ -17,7 +15,7 @@ i2cdev = { version = "0.6.2", optional = true }
 [dependencies.embedded-hal-async]
 # New dependency for asynchronous operation
 version = "1.0.0"
-optional = true 
+optional = true
 
 [dev-dependencies]
 anyhow = "1.0.100"
@@ -26,10 +24,10 @@ anyhow = "1.0.100"
 default = []
 std = []
 
-xtalk = ["vl53l5cx-sys/xtalk"]
-motion = ["vl53l5cx-sys/motion"]
-thresholds = ["vl53l5cx-sys/thresholds"]
-raw-format = ["vl53l5cx-sys/raw-format"]
+xtalk = ["vl53l8cx-sys/xtalk"]
+motion = ["vl53l8cx-sys/motion"]
+thresholds = ["vl53l8cx-sys/thresholds"]
+raw-format = ["vl53l8cx-sys/raw-format"]
 
 targets-1 = []
 targets-2 = []

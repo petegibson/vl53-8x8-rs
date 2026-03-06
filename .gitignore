@@ -36,3 +36,6 @@
 *.sln.docstates
 
 # End of https://www.toptal.com/developers/gitignore/api/rust
+
+vl53l5cx-driver/target
+vl53l5cx-sys/target

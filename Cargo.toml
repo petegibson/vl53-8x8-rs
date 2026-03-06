@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "vl53l5cx-sys",
-    "vl53l5cx-driver",
+    "vl53l8cx-sys",
+    "vl53l8cx-driver",
 ]
 resolver = "2"
