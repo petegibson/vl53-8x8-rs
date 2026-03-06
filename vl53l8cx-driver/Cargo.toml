@@ -33,6 +33,17 @@ targets-1 = []
 targets-2 = []
 targets-3 = []
 targets-4 = []
+
+# Output disablement features for size optimization (opt-in to DISABLE/remove)
+disable-ambient = ["vl53l8cx-sys/disable-ambient"]
+disable-spads = ["vl53l8cx-sys/disable-spads"]
+disable-nb-targets = ["vl53l8cx-sys/disable-nb-targets"]
+disable-signal = ["vl53l8cx-sys/disable-signal"]
+disable-range-sigma = ["vl53l8cx-sys/disable-range-sigma"]
+disable-distance = ["vl53l8cx-sys/disable-distance"]
+disable-target-status = ["vl53l8cx-sys/disable-target-status"]
+disable-reflectance = ["vl53l8cx-sys/disable-reflectance"]
+disable-motion-indicator-output = ["vl53l8cx-sys/disable-motion-indicator-output"]
 # Feature to enable the async implementation
 async-hal = ["dep:embedded-hal-async"]
 
