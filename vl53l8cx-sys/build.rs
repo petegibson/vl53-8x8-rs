@@ -158,6 +158,8 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
     cc_build
         .files(c_sources)
         .include(driver_dir.join("inc"))
+        // Suppress signed/unsigned comparison warning in ST's SwapBuffer macro
+        .flag("-Wno-sign-compare")
         // Configure driver settings.
         .define("VL53L8CX_NB_TARGET_PER_ZONE", nb_targets)
         // This tells the C driver to use the high-level platform functions.
