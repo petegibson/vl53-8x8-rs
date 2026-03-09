@@ -11,13 +11,15 @@ defmt-rtt = "0.4"
 stm32f4xx-hal = { version = "0.22", features = ["stm32f401"] }
 embedded-hal = "1.0"
 vl53l8cx-driver = { path = "../vl53l8cx-driver" }
+embedded-hal-bus = { version = "0.2", optional = true }
 panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
 
 [dev-dependencies]
 embedded-test = { version = "0.7", features = ["defmt"] }
 
 [features]
-default = ["panic-probe"]
+default = ["dep:panic-probe"]
+spi-bus = ["dep:embedded-hal-bus", "dep:panic-probe"]
 
 [lib]
 test = false
@@ -30,6 +32,11 @@ test = false
 [[test]]
 name = "sensor"
 path = "tests/sensor.rs"
+harness = false
+
+[[test]]
+name = "sensor_spi"
+path = "tests/sensor_spi.rs"
 harness = false
 
 [profile.release]

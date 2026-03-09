@@ -11,7 +11,8 @@ use embedded_hal::delay::DelayNs;
 #[cfg(feature = "async-hal")]
 use embedded_hal_async::digital::Wait;
 use embedded_hal::digital::InputPin;
-use embedded_hal::i2c::{I2c, SevenBitAddress};
+use embedded_hal::i2c::I2c;
+use embedded_hal::spi::SpiDevice;
 use embedded_hal::digital::OutputPin;
 
 // We import the sys crate internally but do NOT make it public.
@@ -153,7 +154,7 @@ impl From<u8> for FirmwareError {
 /// Represents errors that can occur in the driver.
 #[derive(Debug)]
 pub enum Error<E> {
-    I2c(E),
+    Bus(E),
     NotAlive,
     Firmware(FirmwareError),
     PinMissing,
@@ -164,7 +165,7 @@ pub enum Error<E> {
 impl<E: std::error::Error + 'static> std::error::Error for Error<E> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::I2c(e) => Some(e),
+            Error::Bus(e) => Some(e),
             _ => None,
         }
     }
@@ -174,7 +175,7 @@ impl<E: std::error::Error + 'static> std::error::Error for Error<E> {
 impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::I2c(e) => write!(f, "I2C error: {:?}", e),
+            Error::Bus(e) => write!(f, "Bus error: {:?}", e),
             Error::NotAlive => write!(f, "Sensor not found at address"),
             Error::Firmware(e) => write!(f, "Firmware error: {:?}", e),
             Error::PinMissing => write!(f, "A required hardware pin was not configured"),
@@ -183,15 +184,33 @@ impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
     }
 }
 
+/// Trait abstracting bus error types for I2C and SPI.
+pub trait VlBus {
+    type Error: core::fmt::Debug;
+}
+
+impl<T: I2c> VlBus for T {
+    type Error = <T as embedded_hal::i2c::ErrorType>::Error;
+}
+
+/// Wrapper around an `SpiDevice` to implement `VlBus`.
+pub struct Vl53l8cxSpiDevice<SPI> {
+    pub spi: SPI,
+}
+
+impl<SPI: SpiDevice> VlBus for Vl53l8cxSpiDevice<SPI> {
+    type Error = <SPI as embedded_hal::spi::ErrorType>::Error;
+}
+
 #[repr(C)]
-pub struct Vl53l8cxComms<I2C, D> {
-    pub i2c: I2C,
+pub struct Vl53l8cxComms<BUS, D> {
+    pub bus: BUS,
     pub delay: D,
 }
 
-pub struct Vl53l8cx<I2C, D, RST = NoPin, INT = NoPin> {
-    pub comms: Vl53l8cxComms<I2C, D>,
-    address: SevenBitAddress,
+pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
+    pub comms: Vl53l8cxComms<BUS, D>,
+    address: u16,
     reset_pin: RST,
     int_pin: INT,
     has_reset: bool,
@@ -200,15 +219,15 @@ pub struct Vl53l8cx<I2C, D, RST = NoPin, INT = NoPin> {
     stdev: sys::VL53L8CX_Configuration,
 }
 
-impl<I2C, D> Vl53l8cx<I2C, D, NoPin, NoPin>
+impl<BUS, D> Vl53l8cx<BUS, D, NoPin, NoPin>
 where
-    I2C: I2c,
+    BUS: I2c,
     D: DelayNs,
 {
-    pub fn new(i2c: I2C, delay: D) -> Self {
+    pub fn new(i2c: BUS, delay: D) -> Self {
         Self {
-            comms: Vl53l8cxComms { i2c, delay },
-            address: DEFAULT_ADDRESS,
+            comms: Vl53l8cxComms { bus: i2c, delay },
+            address: DEFAULT_ADDRESS as u16,
             reset_pin: NoPin,
             int_pin: NoPin,
             has_reset: false,
@@ -219,9 +238,28 @@ where
     }
 }
 
-impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
+impl<SPI, D> Vl53l8cx<Vl53l8cxSpiDevice<SPI>, D, NoPin, NoPin>
 where
-    I2C: I2c<Error = E>,
+    SPI: SpiDevice,
+    D: DelayNs,
+{
+    pub fn new_spi(spi: SPI, delay: D) -> Self {
+        Self {
+            comms: Vl53l8cxComms { bus: Vl53l8cxSpiDevice { spi }, delay },
+            address: DEFAULT_ADDRESS as u16,
+            reset_pin: NoPin,
+            int_pin: NoPin,
+            has_reset: false,
+            lp_is_reset_high: false,
+            int_is_data_ready_high: false,
+            stdev: unsafe { core::mem::zeroed() },
+        }
+    }
+}
+
+impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
+where
+    BUS: VlBus<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
@@ -242,9 +280,9 @@ where
 }
 
 #[cfg(feature = "async-hal")]
-impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
+impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
-    I2C: I2c<Error = E>,
+    BUS: VlBus<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
@@ -262,8 +300,8 @@ where
     }
 }
 
-impl<I2C, D, RST, INT> Vl53l8cx<I2C, D, RST, INT> {
-    pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<I2C, D, RstNew, INT> {
+impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
+    pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<BUS, D, RstNew, INT> {
         Vl53l8cx {
             comms: self.comms,
             address: self.address,
@@ -276,7 +314,7 @@ impl<I2C, D, RST, INT> Vl53l8cx<I2C, D, RST, INT> {
         }
     }
 
-    pub fn with_reset_pin_active_high<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<I2C, D, RstNew, INT> {
+    pub fn with_reset_pin_active_high<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<BUS, D, RstNew, INT> {
         Vl53l8cx {
             comms: self.comms,
             address: self.address,
@@ -289,7 +327,7 @@ impl<I2C, D, RST, INT> Vl53l8cx<I2C, D, RST, INT> {
         }
     }
 
-    pub fn with_interrupt_pin_active_low<IntNew>(self, int_pin: IntNew) -> Vl53l8cx<I2C, D, RST, IntNew> {
+    pub fn with_interrupt_pin_active_low<IntNew>(self, int_pin: IntNew) -> Vl53l8cx<BUS, D, RST, IntNew> {
         Vl53l8cx {
             comms: self.comms,
             address: self.address,
@@ -302,7 +340,7 @@ impl<I2C, D, RST, INT> Vl53l8cx<I2C, D, RST, INT> {
         }
     }
 
-    pub fn with_interrupt_pin_active_high<IntNew>(self, int_pin: IntNew) -> Vl53l8cx<I2C, D, RST, IntNew> {
+    pub fn with_interrupt_pin_active_high<IntNew>(self, int_pin: IntNew) -> Vl53l8cx<BUS, D, RST, IntNew> {
         Vl53l8cx {
             comms: self.comms,
             address: self.address,
@@ -316,9 +354,9 @@ impl<I2C, D, RST, INT> Vl53l8cx<I2C, D, RST, INT> {
     }
 }
 
-impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
+impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
-    I2C: I2c<Error = E>,
+    BUS: VlBus<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
@@ -326,7 +364,7 @@ where
     #[inline]
     fn bind_platform(&mut self) {
         self.stdev.platform.p_com = &mut self.comms as *mut _ as *mut core::ffi::c_void;
-        self.stdev.platform.address = self.address as u16;
+        self.stdev.platform.address = self.address;
     }
 
     fn set_reset_state(&mut self, target_state_reset: bool) -> Result<(), Error<E>> {
@@ -366,7 +404,7 @@ where
         if status != 0 {
             return Err(Error::Firmware(status.into()));
         }
-        self.address = new_address;
+        self.address = new_address as u16;
         self.stdev.platform.address = new_address as u16;
         Ok(())
     }
@@ -593,7 +631,7 @@ where
         self.set_reset_state(false)?;
         self.comms.delay.delay_ms(2);
 
-        self.stdev.platform.address = self.address as u16;
+        self.stdev.platform.address = self.address;
         self.bind_platform();
 
         if !self.is_alive()? {
@@ -641,7 +679,7 @@ macro_rules! bind_platform_driver {
             let index_bytes = index.to_be_bytes();
             let address = platform.address as u8;
 
-            match embedded_hal::i2c::I2c::write_read(&mut comms.i2c, address, &index_bytes, data_slice) {
+            match embedded_hal::i2c::I2c::write_read(&mut comms.bus, address, &index_bytes, data_slice) {
                 Ok(_) => 0,
                 Err(_) => 1,
             }
@@ -667,7 +705,7 @@ macro_rules! bind_platform_driver {
                 embedded_hal::i2c::Operation::Write(data_slice),
             ];
 
-            match embedded_hal::i2c::I2c::transaction(&mut comms.i2c, address, &mut operations) {
+            match embedded_hal::i2c::I2c::transaction(&mut comms.bus, address, &mut operations) {
                 Ok(_) => 0,
                 Err(_) => 1,
             }
@@ -691,11 +729,77 @@ macro_rules! bind_platform_driver {
     };
 }
 
+#[macro_export]
+macro_rules! bind_platform_driver_spi {
+    ($spi_type:ty, $delay_type:ty) => {
+        #[no_mangle]
+        pub extern "C" fn vl53l8cx_platform_read(
+            p_platform: *mut $crate::VL53L8CX_Platform,
+            index: u16,
+            p_values: *mut u8,
+            size: u32,
+        ) -> u8 {
+            if p_platform.is_null() { return 255; }
+            let platform = unsafe { &*p_platform };
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l8cxComms<$crate::Vl53l8cxSpiDevice<$spi_type>, $delay_type>) };
+
+            let data_slice = unsafe { core::slice::from_raw_parts_mut(p_values, size as usize) };
+            let addr_bytes = (index & 0x7FFF).to_be_bytes();
+
+            match embedded_hal::spi::SpiDevice::transaction(&mut comms.bus.spi, &mut [
+                embedded_hal::spi::Operation::Write(&addr_bytes),
+                embedded_hal::spi::Operation::Read(data_slice),
+            ]) {
+                Ok(_) => 0,
+                Err(_) => 1,
+            }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn vl53l8cx_platform_write(
+            p_platform: *mut $crate::VL53L8CX_Platform,
+            index: u16,
+            p_values: *mut u8,
+            size: u32,
+        ) -> u8 {
+            if p_platform.is_null() { return 255; }
+            let platform = unsafe { &*p_platform };
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l8cxComms<$crate::Vl53l8cxSpiDevice<$spi_type>, $delay_type>) };
+
+            let data_slice = unsafe { core::slice::from_raw_parts(p_values, size as usize) };
+            let addr_bytes = (index | 0x8000).to_be_bytes();
+
+            match embedded_hal::spi::SpiDevice::transaction(&mut comms.bus.spi, &mut [
+                embedded_hal::spi::Operation::Write(&addr_bytes),
+                embedded_hal::spi::Operation::Write(data_slice),
+            ]) {
+                Ok(_) => 0,
+                Err(_) => 1,
+            }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn vl53l8cx_platform_wait_ms(p_platform: *mut $crate::VL53L8CX_Platform, milliseconds: u32) -> u8 {
+            if p_platform.is_null() { return 255; }
+            let platform = unsafe { &*p_platform };
+            let comms = unsafe { &mut *(platform.p_com as *mut $crate::Vl53l8cxComms<$crate::Vl53l8cxSpiDevice<$spi_type>, $delay_type>) };
+
+            embedded_hal::delay::DelayNs::delay_ms(&mut comms.delay, milliseconds);
+            0
+        }
+
+        #[no_mangle]
+        pub extern "C" fn vl53l8cx_platform_init(_p_platform: *mut $crate::VL53L8CX_Platform) -> u8 { 0 }
+
+        #[no_mangle]
+        pub extern "C" fn vl53l8cx_platform_terminate(_p_platform: *mut $crate::VL53L8CX_Platform) -> u8 { 0 }
+    };
+}
 
 #[cfg(any(feature = "motion", feature = "thresholds"))]
-impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
+impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
-    I2C: I2c<Error = E>,
+    BUS: VlBus<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
@@ -752,9 +856,9 @@ where
 }
 
 #[cfg(feature = "xtalk")]
-impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
+impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
-    I2C: I2c<Error = E>,
+    BUS: VlBus<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
@@ -814,9 +918,9 @@ where
 }
 
 #[cfg(feature = "thresholds")]
-impl<I2C, D, RST, INT, E> Vl53l8cx<I2C, D, RST, INT>
+impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
-    I2C: I2c<Error = E>,
+    BUS: VlBus<Error = E>,
     D: DelayNs,
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
