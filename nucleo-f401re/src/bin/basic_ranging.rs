@@ -18,10 +18,7 @@ fn main() -> ! {
     #[cfg(feature = "spi-bus")]
     defmt::info!("VL53L8CX firmware starting (SPI bus)");
 
-    #[cfg(not(feature = "spi-bus"))]
     let mut sensor = nucleo_f401re::board_init();
-    #[cfg(feature = "spi-bus")]
-    let mut sensor = nucleo_f401re::spi::board_init_spi();
 
     defmt::info!("Initialising sensor...");
     if let Err(e) = sensor.init() {

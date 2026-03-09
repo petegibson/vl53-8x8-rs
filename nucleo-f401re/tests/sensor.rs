@@ -17,10 +17,16 @@ mod tests {
     #[test]
     #[timeout(5)]
     fn test_sensor_alive(mut sensor: nucleo_f401re::Sensor) {
+        #[cfg(not(feature = "spi-bus"))]
         defmt::assert!(
             sensor.is_alive().unwrap(),
-            "sensor.is_alive failed, check X-NUCLEO-53L8A1 is connected"
-            );
+            "sensor.is_alive failed, check X-NUCLEO-53L8A1 is connected and I2C jumpers are set"
+        );
+        #[cfg(feature = "spi-bus")]
+        defmt::assert!(
+            sensor.is_alive().unwrap(),
+            "sensor.is_alive failed, check X-NUCLEO-53L8A1 SPI jumpers are set (I2C_RST high)"
+        );
     }
 
     #[test]

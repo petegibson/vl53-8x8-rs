@@ -34,10 +34,6 @@ name = "sensor"
 path = "tests/sensor.rs"
 harness = false
 
-[[test]]
-name = "sensor_spi"
-path = "tests/sensor_spi.rs"
-harness = false
 
 [profile.release]
 debug = 2
