@@ -10,10 +10,9 @@ use embedded_hal::delay::DelayNs;
 
 #[cfg(feature = "async-hal")]
 use embedded_hal_async::digital::Wait;
-use embedded_hal::digital::InputPin;
+use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal::i2c::I2c;
 use embedded_hal::spi::SpiDevice;
-use embedded_hal::digital::OutputPin;
 
 // We import the sys crate internally but do NOT make it public.
 use vl53l8cx_sys as sys;
@@ -115,15 +114,6 @@ pub struct DetectionThreshold {
 /// A placeholder type for an unconfigured hardware pin.
 pub struct NoPin;
 
-impl embedded_hal::digital::ErrorType for NoPin {
-    type Error = core::convert::Infallible;
-}
-
-impl embedded_hal::digital::OutputPin for NoPin {
-    fn set_low(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    fn set_high(&mut self) -> Result<(), Self::Error> { Ok(()) }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FirmwareError {
     Timeout,
@@ -157,7 +147,6 @@ pub enum Error<E> {
     Bus(E),
     NotAlive,
     Firmware(FirmwareError),
-    PinMissing,
     Pin,
 }
 
@@ -178,7 +167,6 @@ impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
             Error::Bus(e) => write!(f, "Bus error: {:?}", e),
             Error::NotAlive => write!(f, "Sensor not found at address"),
             Error::Firmware(e) => write!(f, "Firmware error: {:?}", e),
-            Error::PinMissing => write!(f, "A required hardware pin was not configured"),
             Error::Pin => write!(f, "Pin error"),
         }
     }
@@ -213,7 +201,6 @@ pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     address: u16,
     reset_pin: RST,
     int_pin: INT,
-    has_reset: bool,
     lp_is_reset_high: bool,
     int_is_data_ready_high: bool,
     stdev: sys::VL53L8CX_Configuration,
@@ -230,7 +217,6 @@ where
             address: DEFAULT_ADDRESS as u16,
             reset_pin: NoPin,
             int_pin: NoPin,
-            has_reset: false,
             lp_is_reset_high: false,
             int_is_data_ready_high: false,
             stdev: unsafe { core::mem::zeroed() },
@@ -249,7 +235,6 @@ where
             address: DEFAULT_ADDRESS as u16,
             reset_pin: NoPin,
             int_pin: NoPin,
-            has_reset: false,
             lp_is_reset_high: false,
             int_is_data_ready_high: false,
             stdev: unsafe { core::mem::zeroed() },
@@ -260,9 +245,6 @@ where
 impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
     BUS: VlBus<Error = E>,
-    D: DelayNs,
-    RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
     INT: InputPin,
     <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
@@ -283,9 +265,6 @@ where
 impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
     BUS: VlBus<Error = E>,
-    D: DelayNs,
-    RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
     INT: Wait,
     <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
@@ -307,7 +286,6 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             address: self.address,
             reset_pin,
             int_pin: self.int_pin,
-            has_reset: true,
             lp_is_reset_high: false,
             int_is_data_ready_high: self.int_is_data_ready_high,
             stdev: self.stdev,
@@ -320,7 +298,6 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             address: self.address,
             reset_pin,
             int_pin: self.int_pin,
-            has_reset: true,
             lp_is_reset_high: true,
             int_is_data_ready_high: self.int_is_data_ready_high,
             stdev: self.stdev,
@@ -333,7 +310,6 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             address: self.address,
             reset_pin: self.reset_pin,
             int_pin,
-            has_reset: self.has_reset,
             lp_is_reset_high: self.lp_is_reset_high,
             int_is_data_ready_high: false,
             stdev: self.stdev,
@@ -346,7 +322,6 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             address: self.address,
             reset_pin: self.reset_pin,
             int_pin,
-            has_reset: self.has_reset,
             lp_is_reset_high: self.lp_is_reset_high,
             int_is_data_ready_high: true,
             stdev: self.stdev,
@@ -361,12 +336,6 @@ where
     RST: OutputPin,
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
-    #[inline]
-    fn bind_platform(&mut self) {
-        self.stdev.platform.p_com = &mut self.comms as *mut _ as *mut core::ffi::c_void;
-        self.stdev.platform.address = self.address;
-    }
-
     fn set_reset_state(&mut self, target_state_reset: bool) -> Result<(), Error<E>> {
         let set_pin_high = target_state_reset ^ self.lp_is_reset_high;
         let result = if set_pin_high {
@@ -378,9 +347,6 @@ where
     }
 
     pub fn reset(&mut self) -> Result<(), Error<E>> {
-        if !self.has_reset {
-            return Err(Error::PinMissing);
-        }
         self.set_reset_state(true)?;
         self.comms.delay.delay_ms(10);
         self.set_reset_state(false)?;
@@ -388,9 +354,6 @@ where
     }
 
     pub fn set_address(&mut self, new_address: u8) -> Result<(), Error<E>> {
-        if !self.has_reset {
-            return Err(Error::PinMissing);
-        }
         self.set_reset_state(true)?;
         self.comms.delay.delay_ms(2);
         self.set_reset_state(false)?;
@@ -407,6 +370,18 @@ where
         self.address = new_address as u16;
         self.stdev.platform.address = new_address as u16;
         Ok(())
+    }
+}
+
+impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
+where
+    BUS: VlBus<Error = E>,
+    D: DelayNs,
+{
+    #[inline]
+    fn bind_platform(&mut self) {
+        self.stdev.platform.p_com = &mut self.comms as *mut _ as *mut core::ffi::c_void;
+        self.stdev.platform.address = self.address;
     }
 
     pub fn start_ranging(&mut self) -> Result<(), Error<E>> {
@@ -628,9 +603,6 @@ where
     }
 
     pub fn init(&mut self) -> Result<(), Error<E>> {
-        self.set_reset_state(false)?;
-        self.comms.delay.delay_ms(2);
-
         self.stdev.platform.address = self.address;
         self.bind_platform();
 
@@ -801,8 +773,6 @@ impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
     BUS: VlBus<Error = E>,
     D: DelayNs,
-    RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub fn motion_indicator_init(&mut self, motion_config: &mut sys::VL53L8CX_Motion_Configuration, resolution: Resolution) -> Result<(), Error<E>> {
         self.bind_platform();
@@ -860,8 +830,6 @@ impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
     BUS: VlBus<Error = E>,
     D: DelayNs,
-    RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     pub fn calibrate_xtalk(&mut self, reflectance_percent: u16, nb_samples: u8, distance_mm: u16) -> Result<(), Error<E>> {
         self.bind_platform();
@@ -922,8 +890,6 @@ impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
 where
     BUS: VlBus<Error = E>,
     D: DelayNs,
-    RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     fn scale_thresholds_for_read(thresholds: &mut [DetectionThreshold]) {
         for t in thresholds.iter_mut() {
