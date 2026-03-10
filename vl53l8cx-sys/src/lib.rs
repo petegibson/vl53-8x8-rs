@@ -86,3 +86,190 @@ pub mod thresholds {
 // Re-export threshold constants to top level if feature is enabled
 #[cfg(feature = "thresholds")]
 pub use thresholds::*;
+
+// --- Shared Types ---
+// These types are used by both the blocking driver and the async driver.
+
+/// The default I2C address of the VL53L8CX sensor (7-bit).
+pub const DEFAULT_ADDRESS: u8 = 0x29;
+
+/// The required buffer size for crosstalk calibration data (776 bytes).
+pub const XTALK_BUFFER_SIZE: usize = 776;
+
+/// A placeholder type for an unconfigured hardware pin.
+pub struct NoPin;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Resolution {
+    Res4x4 = VL53L8CX_RESOLUTION_4X4,
+    Res8x8 = VL53L8CX_RESOLUTION_8X8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TargetOrder {
+    Closest = VL53L8CX_TARGET_ORDER_CLOSEST,
+    Strongest = VL53L8CX_TARGET_ORDER_STRONGEST,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RangingMode {
+    Continuous = VL53L8CX_RANGING_MODE_CONTINUOUS,
+    Autonomous = VL53L8CX_RANGING_MODE_AUTONOMOUS,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PowerMode {
+    Sleep = VL53L8CX_POWER_MODE_SLEEP,
+    Wakeup = VL53L8CX_POWER_MODE_WAKEUP,
+    DeepSleep = VL53L8CX_POWER_MODE_DEEP_SLEEP,
+}
+
+#[cfg(feature = "thresholds")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ThresholdMeasurement {
+    DistanceMm = VL53L8CX_DISTANCE_MM,
+    SignalPerSpadKcps = VL53L8CX_SIGNAL_PER_SPAD_KCPS,
+    RangeSigmaMm = VL53L8CX_RANGE_SIGMA_MM,
+    AmbientPerSpadKcps = VL53L8CX_AMBIENT_PER_SPAD_KCPS,
+    NbTargetDetected = VL53L8CX_NB_TARGET_DETECTED,
+    TargetStatus = VL53L8CX_TARGET_STATUS,
+    NbSpadsEnabled = VL53L8CX_NB_SPADS_ENABLED,
+    MotionIndicator = VL53L8CX_MOTION_INDICATOR,
+}
+
+#[cfg(feature = "thresholds")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ThresholdType {
+    InWindow = VL53L8CX_IN_WINDOW,
+    OutOfWindow = VL53L8CX_OUT_OF_WINDOW,
+    LessThanEqualMin = VL53L8CX_LESS_THAN_EQUAL_MIN_CHECKER,
+    GreaterThanMax = VL53L8CX_GREATER_THAN_MAX_CHECKER,
+    EqualMin = VL53L8CX_EQUAL_MIN_CHECKER,
+    NotEqualMin = VL53L8CX_NOT_EQUAL_MIN_CHECKER,
+}
+
+#[cfg(feature = "thresholds")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ThresholdOperation {
+    Or = VL53L8CX_OPERATION_OR,
+    And = VL53L8CX_OPERATION_AND,
+    None = VL53L8CX_OPERATION_NONE,
+}
+
+#[cfg(feature = "thresholds")]
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct DetectionThreshold {
+    pub low_threshold: i32,
+    pub high_threshold: i32,
+    pub measurement: ThresholdMeasurement,
+    pub threshold_type: ThresholdType,
+    pub zone_num: u8,
+    pub mathematic_operation: ThresholdOperation,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FirmwareError {
+    Timeout,
+    CorruptedFrame,
+    LaserSafety,
+    XtalkFailed,
+    FwChecksumFail,
+    McuError,
+    InvalidParam,
+    Unknown(u8),
+}
+
+impl From<u8> for FirmwareError {
+    fn from(code: u8) -> Self {
+        match code {
+            VL53L8CX_STATUS_TIMEOUT_ERROR => FirmwareError::Timeout,
+            VL53L8CX_STATUS_CORRUPTED_FRAME => FirmwareError::CorruptedFrame,
+            VL53L8CX_STATUS_LASER_SAFETY => FirmwareError::LaserSafety,
+            VL53L8CX_STATUS_XTALK_FAILED => FirmwareError::XtalkFailed,
+            VL53L8CX_STATUS_FW_CHECKSUM_FAIL => FirmwareError::FwChecksumFail,
+            VL53L8CX_MCU_ERROR => FirmwareError::McuError,
+            VL53L8CX_STATUS_INVALID_PARAM => FirmwareError::InvalidParam,
+            c => FirmwareError::Unknown(c),
+        }
+    }
+}
+
+/// Represents errors that can occur in the driver.
+#[derive(Debug)]
+pub enum Error<E> {
+    Bus(E),
+    NotAlive,
+    Firmware(FirmwareError),
+    Pin,
+}
+
+#[cfg(feature = "std")]
+impl<E: std::error::Error + 'static> std::error::Error for Error<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Bus(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Bus(e) => write!(f, "Bus error: {:?}", e),
+            Error::NotAlive => write!(f, "Sensor not found at address"),
+            Error::Firmware(e) => write!(f, "Firmware error: {:?}", e),
+            Error::Pin => write!(f, "Pin error"),
+        }
+    }
+}
+
+// --- C Data Arrays ---
+// These are compiled into the static library by build.rs and needed by the async driver.
+extern "C" {
+    pub static VL53L8CX_FIRMWARE: [u8; 86016];
+    pub static VL53L8CX_DEFAULT_CONFIGURATION: [u8; 972];
+    pub static VL53L8CX_DEFAULT_XTALK: [u8; 776];
+    pub static VL53L8CX_GET_NVM_CMD: [u8; 40];
+}
+
+// --- UI Command Registers ---
+pub const VL53L8CX_UI_CMD_STATUS: u16 = 0x2C00;
+pub const VL53L8CX_UI_CMD_START: u16 = 0x2C04;
+pub const VL53L8CX_UI_CMD_END: u16 = 0x2FFF;
+
+// --- Data Sizes ---
+pub const VL53L8CX_NVM_DATA_SIZE: u16 = 492;
+pub const VL53L8CX_OFFSET_BUFFER_SIZE: u16 = 488;
+pub const VL53L8CX_CONFIGURATION_SIZE: u16 = 972;
+
+// --- Firmware Checksum ---
+pub const VL53L8CX_FW_CHECKSUM: u32 = 0x0C0B6C9E;
+
+// --- DCI Register Addresses ---
+pub const VL53L8CX_DCI_ZONE_CONFIG: u16 = 0x5450;
+pub const VL53L8CX_DCI_FREQ_HZ: u16 = 0x5458;
+pub const VL53L8CX_DCI_INT_TIME: u16 = 0x545C;
+pub const VL53L8CX_DCI_FW_NB_TARGET: u16 = 0x5478;
+pub const VL53L8CX_DCI_RANGING_MODE: u16 = 0xAD30;
+pub const VL53L8CX_DCI_DSS_CONFIG: u16 = 0xAD38;
+pub const VL53L8CX_DCI_VHV_CONFIG: u16 = 0xAD60;
+pub const VL53L8CX_DCI_TARGET_ORDER: u16 = 0xAE64;
+pub const VL53L8CX_DCI_SHARPENER: u16 = 0xAED8;
+pub const VL53L8CX_DCI_INTERNAL_CP: u16 = 0xB39C;
+pub const VL53L8CX_DCI_SYNC_PIN: u16 = 0xB5F0;
+pub const VL53L8CX_DCI_MOTION_DETECTOR_CFG: u16 = 0xBFAC;
+pub const VL53L8CX_DCI_SINGLE_RANGE: u16 = 0xD964;
+pub const VL53L8CX_DCI_OUTPUT_CONFIG: u16 = 0xD968;
+pub const VL53L8CX_DCI_OUTPUT_ENABLES: u16 = 0xD970;
+pub const VL53L8CX_DCI_OUTPUT_LIST: u16 = 0xD980;
+pub const VL53L8CX_DCI_PIPE_CONTROL: u16 = 0xDB80;

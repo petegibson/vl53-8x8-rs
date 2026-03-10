@@ -1,0 +1,34 @@
+[package]
+name = "vl53l8cx-async"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "An async, platform-agnostic Rust driver for the STMicroelectronics VL53L8CX Time-of-Flight sensor."
+
+[dependencies]
+vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+
+[features]
+default = []
+std = ["vl53l8cx-sys/std"]
+xtalk = ["vl53l8cx-sys/xtalk"]
+motion = ["vl53l8cx-sys/motion"]
+thresholds = ["vl53l8cx-sys/thresholds"]
+raw-format = ["vl53l8cx-sys/raw-format"]
+
+targets-1 = []
+targets-2 = []
+targets-3 = []
+targets-4 = []
+
+disable-ambient = ["vl53l8cx-sys/disable-ambient"]
+disable-spads = ["vl53l8cx-sys/disable-spads"]
+disable-nb-targets = ["vl53l8cx-sys/disable-nb-targets"]
+disable-signal = ["vl53l8cx-sys/disable-signal"]
+disable-range-sigma = ["vl53l8cx-sys/disable-range-sigma"]
+disable-distance = ["vl53l8cx-sys/disable-distance"]
+disable-target-status = ["vl53l8cx-sys/disable-target-status"]
+disable-reflectance = ["vl53l8cx-sys/disable-reflectance"]
+disable-motion-indicator-output = ["vl53l8cx-sys/disable-motion-indicator-output"]

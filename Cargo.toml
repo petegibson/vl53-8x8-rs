@@ -2,8 +2,10 @@
 members = [
     "vl53l8cx-sys",
     "vl53l8cx-driver",
+    "vl53l8cx-async",
 ]
 exclude = [
     "nucleo-f401re",
+    "nucleo-f401re-async",
 ]
 resolver = "2"

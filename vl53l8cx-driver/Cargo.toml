@@ -12,17 +12,12 @@ vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
 # Make i2cdev optional
 i2cdev = { version = "0.6.2", optional = true }
 
-[dependencies.embedded-hal-async]
-# New dependency for asynchronous operation
-version = "1.0.0"
-optional = true
-
 [dev-dependencies]
 anyhow = "1.0.100"
 
 [features]
 default = []
-std = []
+std = ["vl53l8cx-sys/std"]
 
 xtalk = ["vl53l8cx-sys/xtalk"]
 motion = ["vl53l8cx-sys/motion"]
@@ -44,8 +39,6 @@ disable-distance = ["vl53l8cx-sys/disable-distance"]
 disable-target-status = ["vl53l8cx-sys/disable-target-status"]
 disable-reflectance = ["vl53l8cx-sys/disable-reflectance"]
 disable-motion-indicator-output = ["vl53l8cx-sys/disable-motion-indicator-output"]
-# Feature to enable the async implementation
-async-hal = ["dep:embedded-hal-async"]
 
 # Define a feature for the i2cdev backend
 i2cdev-backend = ["i2cdev"]

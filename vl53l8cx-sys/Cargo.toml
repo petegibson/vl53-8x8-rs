@@ -15,6 +15,7 @@ cc = "1.2"
 
 [features]
 # Standard Plugin Features (Opt-in to include)
+std = []
 xtalk = []
 motion = []
 thresholds = []

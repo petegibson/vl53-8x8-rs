@@ -1,0 +1,1117 @@
+use crate::bus::VlBusAsync;
+use embedded_hal_async::delay::DelayNs;
+use vl53l8cx_sys::*;
+
+/// Swap endianness of 4-byte groups in a buffer.
+pub fn swap_buffer(buf: &mut [u8], len: usize) {
+    for i in (0..len).step_by(4) {
+        buf.swap(i, i + 3);
+        buf.swap(i + 1, i + 2);
+    }
+}
+
+/// Poll the sensor for an expected answer. 2s timeout, 10ms intervals.
+pub async fn poll_for_answer<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+    size: u8,
+    pos: u8,
+    register: u16,
+    mask: u8,
+    expected: u8,
+) -> Result<(), Error<BUS::Error>> {
+    for _ in 0..200u8 {
+        bus.read(addr, register, &mut temp_buf[..size as usize])
+            .await
+            .map_err(Error::Bus)?;
+        delay.delay_ms(10).await;
+
+        if size >= 4 && temp_buf[2] >= 0x7F {
+            return Err(Error::Firmware(FirmwareError::McuError));
+        }
+
+        if (temp_buf[pos as usize] & mask) == expected {
+            return Ok(());
+        }
+    }
+    Err(Error::Firmware(FirmwareError::Timeout))
+}
+
+/// Poll for MCU boot. 500ms timeout, 1ms intervals.
+pub async fn poll_for_mcu_boot<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+) -> Result<(), Error<BUS::Error>> {
+    for _ in 0..500u16 {
+        let go2_status0 = bus.read_byte(addr, 0x06).await.map_err(Error::Bus)?;
+
+        if (go2_status0 & 0x80) != 0 {
+            let go2_status1 = bus.read_byte(addr, 0x07).await.map_err(Error::Bus)?;
+            if (go2_status1 & 0x01) != 0 {
+                return Ok(());
+            }
+        }
+
+        delay.delay_ms(1).await;
+
+        if (go2_status0 & 0x01) != 0 {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+/// DCI read: send command → poll → read → swap → copy data out.
+pub async fn dci_read<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+    data: &mut [u8],
+    index: u32,
+    data_size: u16,
+) -> Result<(), Error<BUS::Error>> {
+    let rd_size = data_size as u32 + 12;
+
+    let cmd: [u8; 12] = [
+        (index >> 8) as u8,
+        (index & 0xFF) as u8,
+        ((data_size & 0xFF0) >> 4) as u8,
+        ((data_size & 0x0F) << 4) as u8,
+        0x00,
+        0x00,
+        0x00,
+        0x0F,
+        0x00,
+        0x02,
+        0x00,
+        0x08,
+    ];
+
+    bus.write(addr, VL53L8CX_UI_CMD_END - 11, &cmd)
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus, addr, delay, temp_buf, 4, 1, VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+    )
+    .await?;
+
+    bus.read(
+        addr,
+        VL53L8CX_UI_CMD_START,
+        &mut temp_buf[..rd_size as usize],
+    )
+    .await
+    .map_err(Error::Bus)?;
+    swap_buffer(temp_buf, (data_size + 12) as usize);
+
+    // Copy data out, skipping the 4-byte header
+    data[..data_size as usize].copy_from_slice(&temp_buf[4..4 + data_size as usize]);
+
+    Ok(())
+}
+
+/// DCI write: build packet (header + data + footer) → swap → write → poll.
+pub async fn dci_write<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+    data: &mut [u8],
+    index: u32,
+    data_size: u16,
+) -> Result<(), Error<BUS::Error>> {
+    let headers: [u8; 4] = [
+        (index >> 8) as u8,
+        (index & 0xFF) as u8,
+        ((data_size & 0xFF0) >> 4) as u8,
+        ((data_size & 0x0F) << 4) as u8,
+    ];
+
+    let total_size = data_size + 8;
+    let footer: [u8; 8] = [
+        0x00,
+        0x00,
+        0x00,
+        0x0F,
+        0x05,
+        0x01,
+        (total_size >> 8) as u8,
+        (total_size & 0xFF) as u8,
+    ];
+
+    let address = VL53L8CX_UI_CMD_END - (data_size + 12) + 1;
+
+    // Swap the input data
+    swap_buffer(data, data_size as usize);
+
+    // Build packet in temp_buf: header + data + footer
+    temp_buf[..4].copy_from_slice(&headers);
+    for i in (0..data_size as usize).rev() {
+        temp_buf[i + 4] = data[i];
+    }
+    temp_buf[data_size as usize + 4..data_size as usize + 12].copy_from_slice(&footer);
+
+    bus.write(addr, address, &temp_buf[..(data_size as usize + 12)])
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus, addr, delay, temp_buf, 4, 1, VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+    )
+    .await?;
+
+    // Swap data back to host order
+    swap_buffer(data, data_size as usize);
+
+    Ok(())
+}
+
+/// DCI replace: read → modify → write.
+pub async fn dci_replace<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+    data: &mut [u8],
+    index: u32,
+    data_size: u16,
+    new_data: &[u8],
+    new_data_pos: u16,
+) -> Result<(), Error<BUS::Error>> {
+    dci_read(bus, addr, delay, temp_buf, data, index, data_size).await?;
+    let pos = new_data_pos as usize;
+    data[pos..pos + new_data.len()].copy_from_slice(new_data);
+    dci_write(bus, addr, delay, temp_buf, data, index, data_size).await?;
+    Ok(())
+}
+
+/// Send offset data gathered from NVM.
+pub async fn send_offset_data<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+    offset_data: &[u8],
+    resolution: u8,
+) -> Result<(), Error<BUS::Error>> {
+    let buf_size = VL53L8CX_OFFSET_BUFFER_SIZE as usize;
+    temp_buf[..buf_size].copy_from_slice(&offset_data[..buf_size]);
+
+    if resolution == VL53L8CX_RESOLUTION_4X4 {
+        let dss_4x4: [u8; 8] = [0x0F, 0x04, 0x04, 0x00, 0x08, 0x10, 0x10, 0x07];
+        temp_buf[0x10..0x18].copy_from_slice(&dss_4x4);
+        swap_buffer(temp_buf, buf_size);
+
+        let mut signal_grid = [0u32; 64];
+        let mut range_grid = [0i16; 64];
+
+        for i in 0..64 {
+            let off = 0x3C + i * 4;
+            signal_grid[i] = u32::from_le_bytes([
+                temp_buf[off],
+                temp_buf[off + 1],
+                temp_buf[off + 2],
+                temp_buf[off + 3],
+            ]);
+        }
+        for i in 0..64 {
+            let off = 0x140 + i * 2;
+            range_grid[i] =
+                i16::from_le_bytes([temp_buf[off], temp_buf[off + 1]]);
+        }
+
+        // Extrapolate 8x8 → 4x4
+        for j in 0..4i8 {
+            for i in 0..4i8 {
+                let dst = (i + 4 * j) as usize;
+                let base = (2 * i + 16 * j) as usize;
+                signal_grid[dst] = (signal_grid[base]
+                    + signal_grid[base + 1]
+                    + signal_grid[base + 8]
+                    + signal_grid[base + 9])
+                    / 4;
+                range_grid[dst] = ((range_grid[base] as i32
+                    + range_grid[base + 1] as i32
+                    + range_grid[base + 8] as i32
+                    + range_grid[base + 9] as i32)
+                    / 4) as i16;
+            }
+        }
+
+        // Zero out unused entries
+        for i in 0x10..64 {
+            signal_grid[i] = 0;
+            range_grid[i] = 0;
+        }
+
+        // Write back
+        for i in 0..64 {
+            let off = 0x3C + i * 4;
+            let bytes = signal_grid[i].to_le_bytes();
+            temp_buf[off..off + 4].copy_from_slice(&bytes);
+        }
+        for i in 0..64 {
+            let off = 0x140 + i * 2;
+            let bytes = range_grid[i].to_le_bytes();
+            temp_buf[off..off + 2].copy_from_slice(&bytes);
+        }
+        swap_buffer(temp_buf, buf_size);
+    }
+
+    // Shift data: remove 8-byte header
+    for k in 0..(buf_size - 4) {
+        temp_buf[k] = temp_buf[k + 8];
+    }
+
+    let footer: [u8; 8] = [0x00, 0x00, 0x00, 0x0F, 0x03, 0x01, 0x01, 0xE4];
+    temp_buf[0x1E0..0x1E8].copy_from_slice(&footer);
+
+    bus.write(addr, 0x2E18, &temp_buf[..buf_size])
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus, addr, delay, temp_buf, 4, 1, VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Send xtalk data from default configuration or user calibration.
+pub async fn send_xtalk_data<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+    xtalk_data: &[u8],
+    resolution: u8,
+) -> Result<(), Error<BUS::Error>> {
+    let buf_size = XTALK_BUFFER_SIZE;
+    temp_buf[..buf_size].copy_from_slice(&xtalk_data[..buf_size]);
+
+    if resolution == VL53L8CX_RESOLUTION_4X4 {
+        let res4x4: [u8; 8] = [0x0F, 0x04, 0x04, 0x17, 0x08, 0x10, 0x10, 0x07];
+        let dss_4x4: [u8; 8] = [0x00, 0x78, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08];
+        let profile_4x4: [u8; 4] = [0xA0, 0xFC, 0x01, 0x00];
+
+        temp_buf[0x08..0x10].copy_from_slice(&res4x4);
+        temp_buf[0x20..0x28].copy_from_slice(&dss_4x4);
+
+        swap_buffer(temp_buf, buf_size);
+
+        let mut signal_grid = [0u32; 64];
+        for i in 0..64 {
+            let off = 0x34 + i * 4;
+            signal_grid[i] = u32::from_le_bytes([
+                temp_buf[off],
+                temp_buf[off + 1],
+                temp_buf[off + 2],
+                temp_buf[off + 3],
+            ]);
+        }
+
+        for j in 0..4i8 {
+            for i in 0..4i8 {
+                let dst = (i + 4 * j) as usize;
+                let base = (2 * i + 16 * j) as usize;
+                signal_grid[dst] = (signal_grid[base]
+                    + signal_grid[base + 1]
+                    + signal_grid[base + 8]
+                    + signal_grid[base + 9])
+                    / 4;
+            }
+        }
+
+        for i in 0x10..64 {
+            signal_grid[i] = 0;
+        }
+
+        for i in 0..64 {
+            let off = 0x34 + i * 4;
+            let bytes = signal_grid[i].to_le_bytes();
+            temp_buf[off..off + 4].copy_from_slice(&bytes);
+        }
+
+        swap_buffer(temp_buf, buf_size);
+
+        temp_buf[0x134..0x138].copy_from_slice(&profile_4x4);
+        temp_buf[0x078..0x07C].fill(0);
+    }
+
+    bus.write(addr, 0x2CF8, &temp_buf[..buf_size])
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus, addr, delay, temp_buf, 4, 1, VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Full sensor initialization sequence (translates vl53l8cx_init).
+pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    stdev: &mut VL53L8CX_Configuration,
+) -> Result<(), Error<BUS::Error>> {
+    stdev.is_auto_stop_enabled = 0;
+
+    // SW reboot sequence
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0009, 0x04).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x000F, 0x40).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x000A, 0x03).await.map_err(Error::Bus)?;
+    let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x000C, 0x01).await.map_err(Error::Bus)?;
+
+    bus.write_byte(addr, 0x0101, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0102, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x010A, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x4002, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x4002, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x010A, 0x03).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0103, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x000C, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x000F, 0x43).await.map_err(Error::Bus)?;
+    delay.delay_ms(1).await;
+
+    bus.write_byte(addr, 0x000F, 0x40).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x000A, 0x01).await.map_err(Error::Bus)?;
+    delay.delay_ms(100).await;
+
+    // Wait for sensor booted
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    poll_for_answer(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        1,
+        0,
+        0x06,
+        0xFF,
+        0x01,
+    )
+    .await?;
+
+    bus.write_byte(addr, 0x000E, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
+
+    // Enable FW access
+    bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x06, 0x01).await.map_err(Error::Bus)?;
+    poll_for_answer(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        1,
+        0,
+        0x21,
+        0xFF,
+        0x04,
+    )
+    .await?;
+
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+
+    // Enable host access to GO1
+    let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0C, 0x01).await.map_err(Error::Bus)?;
+
+    // Power ON status
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x101, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x102, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x010A, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x4002, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x4002, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x010A, 0x03).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x103, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x400F, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x21A, 0x43).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x21A, 0x03).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x21A, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x21A, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x219, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x21B, 0x00).await.map_err(Error::Bus)?;
+
+    // Wake up MCU
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+
+    // Download firmware into VL53L8CX (3 pages: 32KB + 32KB + 20KB)
+    let fw = unsafe { &VL53L8CX_FIRMWARE };
+    bus.write_byte(addr, 0x7FFF, 0x09).await.map_err(Error::Bus)?;
+    bus.write(addr, 0x0000, &fw[..0x8000])
+        .await
+        .map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x0A).await.map_err(Error::Bus)?;
+    bus.write(addr, 0x0000, &fw[0x8000..0x10000])
+        .await
+        .map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x0B).await.map_err(Error::Bus)?;
+    bus.write(addr, 0x0000, &fw[0x10000..0x15000])
+        .await
+        .map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+
+    // Check if FW correctly downloaded
+    bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x06, 0x03).await.map_err(Error::Bus)?;
+
+    delay.delay_ms(5).await;
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0C, 0x01).await.map_err(Error::Bus)?;
+
+    // Reset MCU and wait boot
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x114, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x115, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x116, 0x42).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x117, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0B, 0x00).await.map_err(Error::Bus)?;
+    let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0C, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x0B, 0x01).await.map_err(Error::Bus)?;
+
+    poll_for_mcu_boot(bus, addr, delay).await?;
+
+    bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
+
+    // Firmware checksum
+    bus.read(addr, 0x2FFC, &mut stdev.temp_buffer[..4])
+        .await
+        .map_err(Error::Bus)?;
+    swap_buffer(&mut stdev.temp_buffer, 4);
+    let crc = u32::from_le_bytes([
+        stdev.temp_buffer[0],
+        stdev.temp_buffer[1],
+        stdev.temp_buffer[2],
+        stdev.temp_buffer[3],
+    ]);
+    if crc != VL53L8CX_FW_CHECKSUM {
+        return Err(Error::Firmware(FirmwareError::FwChecksumFail));
+    }
+
+    // Get offset NVM data
+    let nvm_cmd = unsafe { &VL53L8CX_GET_NVM_CMD };
+    bus.write(addr, 0x2FD8, nvm_cmd)
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        4,
+        0,
+        VL53L8CX_UI_CMD_STATUS,
+        0xFF,
+        0x02,
+    )
+    .await?;
+    bus.read(
+        addr,
+        VL53L8CX_UI_CMD_START,
+        &mut stdev.temp_buffer[..VL53L8CX_NVM_DATA_SIZE as usize],
+    )
+    .await
+    .map_err(Error::Bus)?;
+    stdev.offset_data[..VL53L8CX_OFFSET_BUFFER_SIZE as usize]
+        .copy_from_slice(&stdev.temp_buffer[..VL53L8CX_OFFSET_BUFFER_SIZE as usize]);
+    send_offset_data(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &stdev.offset_data,
+        VL53L8CX_RESOLUTION_4X4,
+    )
+    .await?;
+
+    // Set default Xtalk shape
+    let default_xtalk = unsafe { &VL53L8CX_DEFAULT_XTALK };
+    stdev.xtalk_data[..XTALK_BUFFER_SIZE].copy_from_slice(default_xtalk);
+    send_xtalk_data(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &stdev.xtalk_data,
+        VL53L8CX_RESOLUTION_4X4,
+    )
+    .await?;
+
+    // Send default configuration
+    let default_cfg = unsafe { &VL53L8CX_DEFAULT_CONFIGURATION };
+    bus.write(addr, 0x2C34, default_cfg)
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        4,
+        1,
+        VL53L8CX_UI_CMD_STATUS,
+        0xFF,
+        0x03,
+    )
+    .await?;
+
+    // DCI pipe control
+    let mut pipe_ctrl: [u8; 4] = [NB_TARGET_PER_ZONE, 0x00, 0x01, 0x00];
+    dci_write(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut pipe_ctrl,
+        VL53L8CX_DCI_PIPE_CONTROL as u32,
+        4,
+    )
+    .await?;
+
+    // Single range
+    let mut single_range = 0x01u32.to_le_bytes();
+    dci_write(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut single_range,
+        VL53L8CX_DCI_SINGLE_RANGE as u32,
+        4,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Check if sensor is alive by reading device and revision IDs.
+pub async fn is_alive<BUS: VlBusAsync>(
+    bus: &mut BUS,
+    addr: u8,
+) -> Result<bool, Error<BUS::Error>> {
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    let device_id = bus.read_byte(addr, 0x00).await.map_err(Error::Bus)?;
+    let revision_id = bus.read_byte(addr, 0x01).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
+    Ok(device_id == 0xF0 && revision_id == 0x0C)
+}
+
+/// Check if new ranging data is available.
+pub async fn check_data_ready<BUS: VlBusAsync>(
+    bus: &mut BUS,
+    addr: u8,
+    stdev: &mut VL53L8CX_Configuration,
+) -> Result<bool, Error<BUS::Error>> {
+    bus.read(addr, 0x0000, &mut stdev.temp_buffer[..4])
+        .await
+        .map_err(Error::Bus)?;
+
+    if stdev.temp_buffer[0] != stdev.streamcount
+        && stdev.temp_buffer[0] != 255
+        && stdev.temp_buffer[1] == 0x05
+        && (stdev.temp_buffer[2] & 0x05) == 0x05
+        && (stdev.temp_buffer[3] & 0x10) == 0x10
+    {
+        stdev.streamcount = stdev.temp_buffer[0];
+        Ok(true)
+    } else {
+        if (stdev.temp_buffer[3] & 0x80) != 0 {
+            return Err(Error::Firmware(stdev.temp_buffer[2].into()));
+        }
+        Ok(false)
+    }
+}
+
+/// Read ranging data from the sensor.
+pub async fn get_ranging_data<BUS: VlBusAsync>(
+    bus: &mut BUS,
+    addr: u8,
+    stdev: &mut VL53L8CX_Configuration,
+) -> Result<VL53L8CX_ResultsData, Error<BUS::Error>> {
+    let read_size = stdev.data_read_size as usize;
+    bus.read(addr, 0x0000, &mut stdev.temp_buffer[..read_size])
+        .await
+        .map_err(Error::Bus)?;
+
+    stdev.streamcount = stdev.temp_buffer[0];
+    swap_buffer(&mut stdev.temp_buffer, read_size);
+
+    let mut results: VL53L8CX_ResultsData = unsafe { core::mem::zeroed() };
+
+    // Parse block headers starting at position 16
+    let mut i = 16usize;
+    while i < read_size {
+        // Block header is a 4-byte value: idx(16) | size(12) | type(4)
+        let bh = u32::from_le_bytes([
+            stdev.temp_buffer[i],
+            stdev.temp_buffer[i + 1],
+            stdev.temp_buffer[i + 2],
+            stdev.temp_buffer[i + 3],
+        ]);
+        let bh_type = bh & 0x0F;
+        let bh_size = ((bh >> 4) & 0x0FFF) as usize;
+        let bh_idx = (bh >> 16) as u16;
+
+        let msize = if bh_type > 1 && bh_type < 0x0D {
+            bh_type as usize * bh_size
+        } else {
+            bh_size
+        };
+
+        let data_start = i + 4;
+        let data = &stdev.temp_buffer[data_start..data_start + msize];
+
+        match bh_idx {
+            VL53L8CX_METADATA_IDX => {
+                results.silicon_temp_degc = stdev.temp_buffer[i + 12] as i8;
+            }
+            #[cfg(not(feature = "disable-ambient"))]
+            VL53L8CX_AMBIENT_RATE_IDX => {
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        results.ambient_per_spad.as_mut_ptr() as *mut u8,
+                        msize,
+                    )
+                };
+                dst.copy_from_slice(data);
+            }
+            #[cfg(not(feature = "disable-spads"))]
+            VL53L8CX_SPAD_COUNT_IDX => {
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        results.nb_spads_enabled.as_mut_ptr() as *mut u8,
+                        msize,
+                    )
+                };
+                dst.copy_from_slice(data);
+            }
+            #[cfg(not(feature = "disable-nb-targets"))]
+            VL53L8CX_NB_TARGET_DETECTED_IDX => {
+                let dst = &mut results.nb_target_detected[..msize];
+                dst.copy_from_slice(data);
+            }
+            #[cfg(not(feature = "disable-signal"))]
+            VL53L8CX_SIGNAL_RATE_IDX => {
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        results.signal_per_spad.as_mut_ptr() as *mut u8,
+                        msize,
+                    )
+                };
+                dst.copy_from_slice(data);
+            }
+            #[cfg(not(feature = "disable-range-sigma"))]
+            VL53L8CX_RANGE_SIGMA_MM_IDX => {
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        results.range_sigma_mm.as_mut_ptr() as *mut u8,
+                        msize,
+                    )
+                };
+                dst.copy_from_slice(data);
+            }
+            #[cfg(not(feature = "disable-distance"))]
+            VL53L8CX_DISTANCE_IDX => {
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        results.distance_mm.as_mut_ptr() as *mut u8,
+                        msize,
+                    )
+                };
+                dst.copy_from_slice(data);
+            }
+            #[cfg(not(feature = "disable-reflectance"))]
+            VL53L8CX_REFLECTANCE_EST_PC_IDX => {
+                let dst = &mut results.reflectance[..msize];
+                dst.copy_from_slice(data);
+            }
+            #[cfg(not(feature = "disable-target-status"))]
+            VL53L8CX_TARGET_STATUS_IDX => {
+                let dst = &mut results.target_status[..msize];
+                dst.copy_from_slice(data);
+            }
+            #[cfg(all(feature = "motion", not(feature = "disable-motion-indicator-output")))]
+            VL53L8CX_MOTION_DETEC_IDX => {
+                let dst = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        &mut results.motion_indicator as *mut _ as *mut u8,
+                        msize,
+                    )
+                };
+                dst.copy_from_slice(data);
+            }
+            _ => {}
+        }
+        i += 4 + msize;
+    }
+
+    #[cfg(not(feature = "raw-format"))]
+    {
+        // Convert data into their real format
+        #[cfg(not(feature = "disable-ambient"))]
+        for v in results.ambient_per_spad.iter_mut() {
+            *v /= 2048;
+        }
+
+        let zones = VL53L8CX_RESOLUTION_8X8 as usize * NB_TARGET_PER_ZONE as usize;
+        #[cfg(not(feature = "disable-distance"))]
+        for v in results.distance_mm[..zones].iter_mut() {
+            *v /= 4;
+        }
+        #[cfg(not(feature = "disable-reflectance"))]
+        for v in results.reflectance[..zones].iter_mut() {
+            *v /= 2;
+        }
+        #[cfg(not(feature = "disable-range-sigma"))]
+        for v in results.range_sigma_mm[..zones].iter_mut() {
+            *v /= 128;
+        }
+        #[cfg(not(feature = "disable-signal"))]
+        for v in results.signal_per_spad[..zones].iter_mut() {
+            *v /= 2048;
+        }
+
+        // Set target status to 255 if no target detected
+        #[cfg(not(feature = "disable-nb-targets"))]
+        for i in 0..VL53L8CX_RESOLUTION_8X8 as usize {
+            if results.nb_target_detected[i] == 0 {
+                for j in 0..NB_TARGET_PER_ZONE as usize {
+                    #[cfg(not(feature = "disable-target-status"))]
+                    {
+                        results.target_status[NB_TARGET_PER_ZONE as usize * i + j] = 255;
+                    }
+                }
+            }
+        }
+
+        #[cfg(all(feature = "motion", not(feature = "disable-motion-indicator-output")))]
+        for v in results.motion_indicator.motion.iter_mut() {
+            *v /= 65535;
+        }
+    }
+
+    // Check header/footer match
+    let header_id = ((stdev.temp_buffer[0x8] as u16) << 8) | (stdev.temp_buffer[0x9] as u16);
+    let footer_id = ((stdev.temp_buffer[read_size - 4] as u16) << 8)
+        | (stdev.temp_buffer[read_size - 3] as u16);
+    if header_id != footer_id {
+        return Err(Error::Firmware(FirmwareError::CorruptedFrame));
+    }
+
+    Ok(results)
+}
+
+/// Start ranging session.
+pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    stdev: &mut VL53L8CX_Configuration,
+) -> Result<(), Error<BUS::Error>> {
+    // Get current resolution
+    dci_read(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut stdev.offset_data[..8],
+        VL53L8CX_DCI_ZONE_CONFIG as u32,
+        8,
+    )
+    .await?;
+    let resolution = stdev.offset_data[0] as u32 * stdev.offset_data[1] as u32;
+
+    stdev.data_read_size = 0;
+    stdev.streamcount = 255;
+
+    // Output block header enables (mandatory: meta, common data, start)
+    let mut output_bh_enable: [u32; 4] = [0x00000007, 0x00000000, 0x00000000, 0xC0000000];
+
+    // Output block headers (these match the C VL53L8CX_*_BH defines from platform.h)
+    let mut output: [u32; 12] = [0; 12];
+    // We need the BH values from platform.h. These encode idx, size, type.
+    // The C code uses defines from platform.h. We reconstruct them here.
+    // START_BH, METADATA_BH, COMMONDATA_BH, then per-output BHs.
+    // Rather than hardcode, we use the index values and set type/size.
+    // The block header format is: idx(16) | size(12) | type(4), little-endian u32.
+    output[0] = 0x000C_0000; // START_BH: size=0x0C, type=0
+    output[1] = make_bh(VL53L8CX_METADATA_IDX, 0x10, 0); // METADATA_BH
+    output[2] = make_bh(0x54C0, 0x0C, 0); // COMMONDATA_BH
+    output[3] = make_bh(VL53L8CX_AMBIENT_RATE_IDX, 0x04, 4); // AMBIENT_RATE_BH
+    output[4] = make_bh(VL53L8CX_SPAD_COUNT_IDX, 0x04, 4); // SPAD_COUNT_BH
+    output[5] = make_bh(VL53L8CX_NB_TARGET_DETECTED_IDX, 0x01, 1); // NB_TARGET_BH
+    output[6] = make_bh(VL53L8CX_SIGNAL_RATE_IDX, 0x04, 4); // SIGNAL_RATE_BH
+    output[7] = make_bh(VL53L8CX_RANGE_SIGMA_MM_IDX, 0x02, 2); // RANGE_SIGMA_BH
+    output[8] = make_bh(VL53L8CX_DISTANCE_IDX, 0x02, 2); // DISTANCE_BH
+    output[9] = make_bh(VL53L8CX_REFLECTANCE_EST_PC_IDX, 0x01, 1); // REFLECTANCE_BH
+    output[10] = make_bh(VL53L8CX_TARGET_STATUS_IDX, 0x01, 1); // TARGET_STATUS_BH
+    output[11] = make_bh(VL53L8CX_MOTION_DETEC_IDX, 0x01, 0x0C); // MOTION_DETECT_BH
+
+    // Enable selected outputs (matching C #ifndef guards)
+    #[cfg(not(feature = "disable-ambient"))]
+    { output_bh_enable[0] += 8; }
+    #[cfg(not(feature = "disable-spads"))]
+    { output_bh_enable[0] += 16; }
+    #[cfg(not(feature = "disable-nb-targets"))]
+    { output_bh_enable[0] += 32; }
+    #[cfg(not(feature = "disable-signal"))]
+    { output_bh_enable[0] += 64; }
+    #[cfg(not(feature = "disable-range-sigma"))]
+    { output_bh_enable[0] += 128; }
+    #[cfg(not(feature = "disable-distance"))]
+    { output_bh_enable[0] += 256; }
+    #[cfg(not(feature = "disable-reflectance"))]
+    { output_bh_enable[0] += 512; }
+    #[cfg(not(feature = "disable-target-status"))]
+    { output_bh_enable[0] += 1024; }
+    #[cfg(not(feature = "disable-motion-indicator-output"))]
+    { output_bh_enable[0] += 2048; }
+
+    // Compute data_read_size
+    for i in 0..output.len() {
+        let bh = output[i];
+        if bh == 0 {
+            continue;
+        }
+        let enable_word = i / 32;
+        let enable_bit = i % 32;
+        if (output_bh_enable[enable_word] & (1 << enable_bit)) == 0 {
+            continue;
+        }
+
+        let bh_type = bh & 0x0F;
+        let bh_size = ((bh >> 4) & 0x0FFF) as u32;
+        let bh_idx = (bh >> 16) as u16;
+
+        if bh_type >= 1 && bh_type < 0x0D {
+            let sz = if bh_idx >= 0x54D0 && bh_idx < (0x54D0 + 960) {
+                resolution
+            } else {
+                resolution * NB_TARGET_PER_ZONE as u32
+            };
+            // Update the output entry with the actual size
+            output[i] = (bh_idx as u32) << 16 | (sz & 0x0FFF) << 4 | bh_type;
+            stdev.data_read_size += bh_type * sz;
+        } else {
+            stdev.data_read_size += bh_size;
+        }
+        stdev.data_read_size += 4;
+    }
+    stdev.data_read_size += 24;
+
+    // Write output list
+    let mut output_bytes = [0u8; 48]; // 12 * 4
+    for (i, val) in output.iter().enumerate() {
+        output_bytes[i * 4..(i + 1) * 4].copy_from_slice(&val.to_le_bytes());
+    }
+    dci_write(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut output_bytes,
+        VL53L8CX_DCI_OUTPUT_LIST as u32,
+        48,
+    )
+    .await?;
+
+    // Write header config (data_read_size, nb_outputs)
+    let mut header_config = [0u8; 8];
+    header_config[..4].copy_from_slice(&stdev.data_read_size.to_le_bytes());
+    let nb_outputs = (output.len() as u32 + 1).to_le_bytes();
+    header_config[4..8].copy_from_slice(&nb_outputs);
+    dci_write(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut header_config,
+        VL53L8CX_DCI_OUTPUT_CONFIG as u32,
+        8,
+    )
+    .await?;
+
+    // Write output enables
+    let mut enables_bytes = [0u8; 16];
+    for (i, val) in output_bh_enable.iter().enumerate() {
+        enables_bytes[i * 4..(i + 1) * 4].copy_from_slice(&val.to_le_bytes());
+    }
+    dci_write(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut enables_bytes,
+        VL53L8CX_DCI_OUTPUT_ENABLES as u32,
+        16,
+    )
+    .await?;
+
+    // Start xshut bypass (interrupt mode)
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x09, 0x05).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
+
+    // Start ranging session
+    let cmd: [u8; 4] = [0x00, 0x03, 0x00, 0x00];
+    bus.write(addr, VL53L8CX_UI_CMD_END - 3, &cmd)
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        4,
+        1,
+        VL53L8CX_UI_CMD_STATUS,
+        0xFF,
+        0x03,
+    )
+    .await?;
+
+    // Verify data_read_size matches firmware expectation
+    let mut verify_buf = [0u8; 12];
+    dci_read(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut verify_buf,
+        0x5440,
+        12,
+    )
+    .await?;
+    let reported_size = u16::from_le_bytes([verify_buf[0x8], verify_buf[0x9]]);
+    if reported_size as u32 != stdev.data_read_size {
+        return Err(Error::Firmware(FirmwareError::Unknown(VL53L8CX_STATUS_ERROR)));
+    }
+
+    // Ensure no laser safety fault
+    let mut safety_buf = [0u8; 8];
+    dci_read(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut safety_buf,
+        0xE0C4,
+        8,
+    )
+    .await?;
+    if safety_buf[0x6] != 0 {
+        return Err(Error::Firmware(FirmwareError::LaserSafety));
+    }
+
+    Ok(())
+}
+
+/// Stop ranging session.
+pub async fn stop_ranging<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: u8,
+    delay: &mut D,
+    stdev: &mut VL53L8CX_Configuration,
+) -> Result<(), Error<BUS::Error>> {
+    // Check auto-stop flag
+    bus.read(addr, 0x2FFC, &mut stdev.temp_buffer[..4])
+        .await
+        .map_err(Error::Bus)?;
+    let auto_stop_flag = u32::from_le_bytes([
+        stdev.temp_buffer[0],
+        stdev.temp_buffer[1],
+        stdev.temp_buffer[2],
+        stdev.temp_buffer[3],
+    ]);
+
+    if auto_stop_flag != 0x4FF && stdev.is_auto_stop_enabled == 0 {
+        bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+
+        // Provoke MCU stop
+        bus.write_byte(addr, 0x15, 0x16).await.map_err(Error::Bus)?;
+        bus.write_byte(addr, 0x14, 0x01).await.map_err(Error::Bus)?;
+
+        // Poll for G02 status 0 MCU stop (5s timeout, 10ms intervals)
+        for _ in 0..500u16 {
+            let tmp = bus.read_byte(addr, 0x06).await.map_err(Error::Bus)?;
+            if (tmp & 0x80) != 0 {
+                break;
+            }
+            delay.delay_ms(10).await;
+        }
+    }
+
+    // Check GO2 status 1
+    let tmp = bus.read_byte(addr, 0x06).await.map_err(Error::Bus)?;
+    if (tmp & 0x80) != 0 {
+        let tmp2 = bus.read_byte(addr, 0x07).await.map_err(Error::Bus)?;
+        if tmp2 != 0x84 && tmp2 != 0x85 {
+            return Err(Error::Firmware(tmp2.into()));
+        }
+    }
+
+    // Undo MCU stop
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x14, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x15, 0x00).await.map_err(Error::Bus)?;
+
+    // Stop xshut bypass
+    bus.write_byte(addr, 0x09, 0x04).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
+
+    Ok(())
+}
+
+/// Set I2C address.
+pub async fn set_i2c_address<BUS: VlBusAsync>(
+    bus: &mut BUS,
+    addr: u8,
+    new_addr: u8,
+) -> Result<(), Error<BUS::Error>> {
+    bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
+    bus.write_byte(addr, 0x04, new_addr >> 1).await.map_err(Error::Bus)?;
+    bus.write_byte(new_addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
+    Ok(())
+}
+
+/// Number of targets per zone (compile-time constant matching C config).
+const NB_TARGET_PER_ZONE: u8 = {
+    #[cfg(feature = "targets-4")]
+    { 4 }
+    #[cfg(all(feature = "targets-3", not(feature = "targets-4")))]
+    { 3 }
+    #[cfg(all(feature = "targets-2", not(feature = "targets-3"), not(feature = "targets-4")))]
+    { 2 }
+    #[cfg(not(any(feature = "targets-2", feature = "targets-3", feature = "targets-4")))]
+    { 1 }
+};
+
+// Block header index constants from vl53l8cx_api.h
+const VL53L8CX_METADATA_IDX: u16 = 0x54B4;
+const VL53L8CX_AMBIENT_RATE_IDX: u16 = 0x54D0;
+const VL53L8CX_SPAD_COUNT_IDX: u16 = 0x55D0;
+const VL53L8CX_NB_TARGET_DETECTED_IDX: u16 = 0xDB84;
+const VL53L8CX_SIGNAL_RATE_IDX: u16 = 0xDBC4;
+const VL53L8CX_RANGE_SIGMA_MM_IDX: u16 = 0xDEC4;
+const VL53L8CX_DISTANCE_IDX: u16 = 0xDF44;
+const VL53L8CX_REFLECTANCE_EST_PC_IDX: u16 = 0xE044;
+const VL53L8CX_TARGET_STATUS_IDX: u16 = 0xE084;
+const VL53L8CX_MOTION_DETEC_IDX: u16 = 0xD858;
+
+/// Build a block header u32 from idx, size, and type.
+const fn make_bh(idx: u16, size: u16, bh_type: u8) -> u32 {
+    ((idx as u32) << 16) | ((size as u32 & 0x0FFF) << 4) | (bh_type as u32 & 0x0F)
+}

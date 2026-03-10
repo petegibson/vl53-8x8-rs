@@ -7,9 +7,6 @@ ST Microelectronics VL53L8CX ULD (Ultra Lite Driver) via the `vl53l8cx-sys` crat
 */
 
 use embedded_hal::delay::DelayNs;
-
-#[cfg(feature = "async-hal")]
-use embedded_hal_async::digital::Wait;
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal::i2c::I2c;
 use embedded_hal::spi::SpiDevice;
@@ -17,160 +14,23 @@ use embedded_hal::spi::SpiDevice;
 // We import the sys crate internally but do NOT make it public.
 use vl53l8cx_sys as sys;
 
-// --- Public Type Re-exports ---
+// --- Public Type Re-exports from sys ---
 pub use sys::VL53L8CX_Platform;
 pub use sys::VL53L8CX_ResultsData as ResultsData;
+pub use sys::{
+    Resolution, TargetOrder, RangingMode, PowerMode,
+    FirmwareError, Error, NoPin, DEFAULT_ADDRESS, XTALK_BUFFER_SIZE,
+};
+#[cfg(feature = "thresholds")]
+pub use sys::{
+    ThresholdMeasurement, ThresholdType, ThresholdOperation, DetectionThreshold,
+};
 
 #[cfg(any(feature = "motion", feature = "thresholds"))]
 pub use sys::VL53L8CX_Motion_Configuration as MotionConfiguration;
 
-/// The default I2C address of the VL53L8CX sensor.
-pub const DEFAULT_ADDRESS: u8 = 0x29;
-
-/// The required buffer size for crosstalk calibration data (776 bytes).
-pub const XTALK_BUFFER_SIZE: usize = 776;
-
 #[cfg(feature = "thresholds")]
 use sys::VL53L8CX_NB_THRESHOLDS;
-
-// --- Idiomatic Rust Enums ---
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Resolution {
-    Res4x4 = sys::VL53L8CX_RESOLUTION_4X4,
-    Res8x8 = sys::VL53L8CX_RESOLUTION_8X8,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum TargetOrder {
-    Closest = sys::VL53L8CX_TARGET_ORDER_CLOSEST,
-    Strongest = sys::VL53L8CX_TARGET_ORDER_STRONGEST,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum RangingMode {
-    Continuous = sys::VL53L8CX_RANGING_MODE_CONTINUOUS,
-    Autonomous = sys::VL53L8CX_RANGING_MODE_AUTONOMOUS,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum PowerMode {
-    Sleep = sys::VL53L8CX_POWER_MODE_SLEEP,
-    Wakeup = sys::VL53L8CX_POWER_MODE_WAKEUP,
-    DeepSleep = sys::VL53L8CX_POWER_MODE_DEEP_SLEEP,
-}
-
-#[cfg(feature = "thresholds")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ThresholdMeasurement {
-    DistanceMm = sys::VL53L8CX_DISTANCE_MM,
-    SignalPerSpadKcps = sys::VL53L8CX_SIGNAL_PER_SPAD_KCPS,
-    RangeSigmaMm = sys::VL53L8CX_RANGE_SIGMA_MM,
-    AmbientPerSpadKcps = sys::VL53L8CX_AMBIENT_PER_SPAD_KCPS,
-    NbTargetDetected = sys::VL53L8CX_NB_TARGET_DETECTED,
-    TargetStatus = sys::VL53L8CX_TARGET_STATUS,
-    NbSpadsEnabled = sys::VL53L8CX_NB_SPADS_ENABLED,
-    MotionIndicator = sys::VL53L8CX_MOTION_INDICATOR,
-}
-
-#[cfg(feature = "thresholds")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ThresholdType {
-    InWindow = sys::VL53L8CX_IN_WINDOW,
-    OutOfWindow = sys::VL53L8CX_OUT_OF_WINDOW,
-    LessThanEqualMin = sys::VL53L8CX_LESS_THAN_EQUAL_MIN_CHECKER,
-    GreaterThanMax = sys::VL53L8CX_GREATER_THAN_MAX_CHECKER,
-    EqualMin = sys::VL53L8CX_EQUAL_MIN_CHECKER,
-    NotEqualMin = sys::VL53L8CX_NOT_EQUAL_MIN_CHECKER,
-}
-
-#[cfg(feature = "thresholds")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ThresholdOperation {
-    Or = sys::VL53L8CX_OPERATION_OR,
-    And = sys::VL53L8CX_OPERATION_AND,
-    None = sys::VL53L8CX_OPERATION_NONE,
-}
-
-#[cfg(feature = "thresholds")]
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct DetectionThreshold {
-    pub low_threshold: i32,
-    pub high_threshold: i32,
-    pub measurement: ThresholdMeasurement,
-    pub threshold_type: ThresholdType,
-    pub zone_num: u8,
-    pub mathematic_operation: ThresholdOperation,
-}
-
-/// A placeholder type for an unconfigured hardware pin.
-pub struct NoPin;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum FirmwareError {
-    Timeout,
-    CorruptedFrame,
-    LaserSafety,
-    XtalkFailed,
-    FwChecksumFail,
-    McuError,
-    InvalidParam,
-    Unknown(u8),
-}
-
-impl From<u8> for FirmwareError {
-    fn from(code: u8) -> Self {
-        match code {
-            sys::VL53L8CX_STATUS_TIMEOUT_ERROR => FirmwareError::Timeout,
-            sys::VL53L8CX_STATUS_CORRUPTED_FRAME => FirmwareError::CorruptedFrame,
-            sys::VL53L8CX_STATUS_LASER_SAFETY => FirmwareError::LaserSafety,
-            sys::VL53L8CX_STATUS_XTALK_FAILED => FirmwareError::XtalkFailed,
-            sys::VL53L8CX_STATUS_FW_CHECKSUM_FAIL => FirmwareError::FwChecksumFail,
-            sys::VL53L8CX_MCU_ERROR => FirmwareError::McuError,
-            sys::VL53L8CX_STATUS_INVALID_PARAM => FirmwareError::InvalidParam,
-            c => FirmwareError::Unknown(c),
-        }
-    }
-}
-
-/// Represents errors that can occur in the driver.
-#[derive(Debug)]
-pub enum Error<E> {
-    Bus(E),
-    NotAlive,
-    Firmware(FirmwareError),
-    Pin,
-}
-
-#[cfg(feature = "std")]
-impl<E: std::error::Error + 'static> std::error::Error for Error<E> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Bus(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Bus(e) => write!(f, "Bus error: {:?}", e),
-            Error::NotAlive => write!(f, "Sensor not found at address"),
-            Error::Firmware(e) => write!(f, "Firmware error: {:?}", e),
-            Error::Pin => write!(f, "Pin error"),
-        }
-    }
-}
 
 /// Trait abstracting bus error types for I2C and SPI.
 pub trait VlBus {
@@ -257,24 +117,6 @@ where
                 break;
             }
         }
-        Ok(())
-    }
-}
-
-#[cfg(feature = "async-hal")]
-impl<BUS, D, RST, INT, E> Vl53l8cx<BUS, D, RST, INT>
-where
-    BUS: VlBus<Error = E>,
-    INT: Wait,
-    <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
-{
-    pub async fn wait_for_data_ready_async(&mut self) -> Result<(), Error<E>> {
-        let result = if self.int_is_data_ready_high {
-            self.int_pin.wait_for_high().await
-        } else {
-            self.int_pin.wait_for_low().await
-        };
-        result.map_err(|_| Error::Pin)?;
         Ok(())
     }
 }
