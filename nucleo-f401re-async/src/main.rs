@@ -5,9 +5,9 @@ use defmt_rtt as _;
 
 use embassy_stm32::i2c;
 use embassy_executor::Spawner;
-use embassy_stm32::gpio::{Level, Output, Pull, Speed};
+use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_time::Delay;
-use vl53l8cx_async::Vl53l8cx;
+use vl53l8cx_async::{BlockingI2c, Vl53l8cx};
 
 use panic_probe as _;
 
@@ -51,14 +51,13 @@ async fn main(_spawner: Spawner) {
     // Keep power pin alive (i2c_rst_c stays low via _i2c_rst_c binding)
     core::mem::forget(pwr_en_c);
 
-    // Reset pin (LPn center) — active-high reset: assert high, delay, deassert low
+    // Reset pin (LPn center) — "active high" means pin HIGH = sensor enabled.
+    // Assert reset = pin LOW, deassert = pin HIGH.
     let mut lp_c = Output::new(p.PB0, Level::Low, Speed::Low);
-    lp_c.set_high(); // assert reset
+    lp_c.set_low(); // assert reset
     cortex_m::asm::delay(84_000 * 10);
-    lp_c.set_low(); // deassert reset
+    lp_c.set_high(); // deassert reset, sensor boots
     cortex_m::asm::delay(84_000 * 100);
-
-    let int_c = embassy_stm32::gpio::Input::new(p.PA4, Pull::Up);
 
     // Async I2C1: PB8 = SCL, PB9 = SDA @ 400 kHz
     // Read PCLK1 from RCC registers directly for diagnostics
@@ -78,15 +77,67 @@ async fn main(_spawner: Spawner) {
         i2c_config,
     );
 
-    let mut sensor = Vl53l8cx::new(i2c, Delay)
-        .with_reset_pin_active_high(lp_c)
-        .with_interrupt_pin_active_low(int_c);
+    // Use BlockingI2c wrapper to avoid STM32F4 I2C v1 async DMA read bug.
+    // The embassy async I2C driver (with DMA) fails on write_read with
+    // Arbitration errors on I2C v1 peripherals (F401, F1, F2, L1).
+    // BlockingI2c uses the blocking trait instead, which works correctly.
+    let mut sensor = Vl53l8cx::new(BlockingI2c(i2c), Delay);
 
-    defmt::info!("init sensor...");
-    let result = sensor.init().await;
-    match result {
-        Ok(_) => defmt::info!("init complete"),
-        Err(e) => defmt::error!("init failed: {:?}", defmt::Debug2Format(&e)),
+    defmt::info!("checking sensor is alive...");
+    match sensor.is_alive().await {
+        Ok(true) => defmt::info!("sensor is alive"),
+        Ok(false) => {
+            defmt::error!("sensor not alive");
+            return;
+        }
+        Err(e) => {
+            defmt::error!("is_alive error: {:?}", defmt::Debug2Format(&e));
+            return;
+        }
+    }
+
+    defmt::info!("initializing sensor...");
+    match sensor.init().await {
+        Ok(()) => defmt::info!("sensor initialized successfully!"),
+        Err(e) => {
+            defmt::error!("init error: {:?}", defmt::Debug2Format(&e));
+            return;
+        }
+    }
+
+    defmt::info!("starting ranging...");
+    match sensor.start_ranging().await {
+        Ok(()) => defmt::info!("ranging started"),
+        Err(e) => {
+            defmt::error!("start_ranging error: {:?}", defmt::Debug2Format(&e));
+            return;
+        }
+    }
+
+    loop {
+        match sensor.poll_data_ready().await {
+            Ok(()) => {}
+            Err(e) => {
+                defmt::error!("poll error: {:?}", defmt::Debug2Format(&e));
+                continue;
+            }
+        }
+
+        match sensor.get_ranging_data().await {
+            Ok(data) => {
+                // Print center zone distances (zones 27,28 for 8x8 or 5 for 4x4)
+                defmt::info!(
+                    "range: z0={}mm z27={}mm z28={}mm z63={}mm",
+                    data.distance_mm[0],
+                    data.distance_mm[27],
+                    data.distance_mm[28],
+                    data.distance_mm[63],
+                );
+            }
+            Err(e) => {
+                defmt::error!("get_ranging_data error: {:?}", defmt::Debug2Format(&e));
+            }
+        }
     }
 }
 

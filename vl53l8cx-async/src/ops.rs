@@ -840,25 +840,22 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
     // Output block header enables (mandatory: meta, common data, start)
     let mut output_bh_enable: [u32; 4] = [0x00000007, 0x00000000, 0x00000000, 0xC0000000];
 
-    // Output block headers (these match the C VL53L8CX_*_BH defines from platform.h)
-    let mut output: [u32; 12] = [0; 12];
-    // We need the BH values from platform.h. These encode idx, size, type.
-    // The C code uses defines from platform.h. We reconstruct them here.
-    // START_BH, METADATA_BH, COMMONDATA_BH, then per-output BHs.
-    // Rather than hardcode, we use the index values and set type/size.
-    // The block header format is: idx(16) | size(12) | type(4), little-endian u32.
-    output[0] = 0x000C_0000; // START_BH: size=0x0C, type=0
-    output[1] = make_bh(VL53L8CX_METADATA_IDX, 0x10, 0); // METADATA_BH
-    output[2] = make_bh(0x54C0, 0x0C, 0); // COMMONDATA_BH
-    output[3] = make_bh(VL53L8CX_AMBIENT_RATE_IDX, 0x04, 4); // AMBIENT_RATE_BH
-    output[4] = make_bh(VL53L8CX_SPAD_COUNT_IDX, 0x04, 4); // SPAD_COUNT_BH
-    output[5] = make_bh(VL53L8CX_NB_TARGET_DETECTED_IDX, 0x01, 1); // NB_TARGET_BH
-    output[6] = make_bh(VL53L8CX_SIGNAL_RATE_IDX, 0x04, 4); // SIGNAL_RATE_BH
-    output[7] = make_bh(VL53L8CX_RANGE_SIGMA_MM_IDX, 0x02, 2); // RANGE_SIGMA_BH
-    output[8] = make_bh(VL53L8CX_DISTANCE_IDX, 0x02, 2); // DISTANCE_BH
-    output[9] = make_bh(VL53L8CX_REFLECTANCE_EST_PC_IDX, 0x01, 1); // REFLECTANCE_BH
-    output[10] = make_bh(VL53L8CX_TARGET_STATUS_IDX, 0x01, 1); // TARGET_STATUS_BH
-    output[11] = make_bh(VL53L8CX_MOTION_DETEC_IDX, 0x01, 0x0C); // MOTION_DETECT_BH
+    // Output block headers — use the exact constants from vl53l8cx_api.h / platform.h.
+    // Format: idx(16) | size(12) | type(4), little-endian u32.
+    let mut output: [u32; 12] = [
+        0x0000000D, // START_BH
+        0x54B400C0, // METADATA_BH
+        0x54C00040, // COMMONDATA_BH
+        0x54D00104, // AMBIENT_RATE_BH
+        0x55D00404, // SPAD_COUNT_BH
+        0xDB840401, // NB_TARGET_DETECTED_BH
+        0xDBC40404, // SIGNAL_RATE_BH
+        0xDEC40402, // RANGE_SIGMA_MM_BH
+        0xDF440402, // DISTANCE_BH
+        0xE0440401, // REFLECTANCE_EST_PC_BH
+        0xE0840401, // TARGET_STATUS_BH
+        0xD85808C0, // MOTION_DETECT_BH
+    ];
 
     // Enable selected outputs (matching C #ifndef guards)
     #[cfg(not(feature = "disable-ambient"))]
@@ -1110,8 +1107,3 @@ const VL53L8CX_DISTANCE_IDX: u16 = 0xDF44;
 const VL53L8CX_REFLECTANCE_EST_PC_IDX: u16 = 0xE044;
 const VL53L8CX_TARGET_STATUS_IDX: u16 = 0xE084;
 const VL53L8CX_MOTION_DETEC_IDX: u16 = 0xD858;
-
-/// Build a block header u32 from idx, size, and type.
-const fn make_bh(idx: u16, size: u16, bh_type: u8) -> u32 {
-    ((idx as u32) << 16) | ((size as u32 & 0x0FFF) << 4) | (bh_type as u32 & 0x0F)
-}

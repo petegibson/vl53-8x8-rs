@@ -26,7 +26,7 @@ pub use sys::{
 #[cfg(feature = "thresholds")]
 pub use sys::{DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType};
 
-pub use bus::Vl53l8cxSpiDevice;
+pub use bus::{BlockingI2c, Vl53l8cxSpiDevice};
 
 pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     bus: BUS,
