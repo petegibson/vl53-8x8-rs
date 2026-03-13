@@ -43,3 +43,4 @@ nucleo-f401re/target
 nucleo-f401re-async/target
 /nucleo-f401re/blocking_log.txt
 /nucleo-f401re-async/async_log.txt
+/nucleo-f401re-async/async_spi_log.txt
