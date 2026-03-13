@@ -10,7 +10,7 @@ defmt = "0.3"
 defmt-rtt = "0.4"
 stm32f4xx-hal = { version = "0.22", features = ["stm32f401"] }
 embedded-hal = "1.0"
-vl53l8cx-driver = { path = "../vl53l8cx-driver", features = ["defmt"] }
+vl53l8cx-driver = { path = "../vl53l8cx-driver" }
 embedded-hal-bus = { version = "0.2", optional = true }
 panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
 
@@ -19,7 +19,7 @@ embedded-test = { version = "0.7", features = ["defmt"] }
 
 [features]
 default = ["dep:panic-probe", "defmt"]
-defmt = ["vl53l8cx-driver/defmt"]
+i2c-defmt-trace = ["vl53l8cx-driver/defmt"]
 spi-bus = ["dep:embedded-hal-bus", "dep:panic-probe"]
 
 [lib]
