@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(async_fn_in_trait)]
 /*!
 An async, platform-agnostic driver for the VL53L8CX Time-of-Flight sensor.
 
