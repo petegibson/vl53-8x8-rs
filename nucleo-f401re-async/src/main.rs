@@ -2,14 +2,17 @@
 #![no_main]
 
 use defmt_rtt as _;
+use panic_probe as _;
 
-use embassy_stm32::i2c;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_stm32::i2c;
 use embassy_time::Delay;
-use vl53l8cx_async::{BlockingI2c, Vl53l8cx};
+use vl53l8cx_async::{BlockingI2c, Resolution, Vl53l8cx};
 
-use panic_probe as _;
+// --- Configuration ---
+const RESOLUTION: Resolution = Resolution::Res4x4;
+const RANGING_FREQ_HZ: u8 = 10;
 
 // I2C1 interrupt bindings for async operation
 embassy_stm32::bind_interrupts!(struct Irqs {
@@ -19,7 +22,7 @@ embassy_stm32::bind_interrupts!(struct Irqs {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    defmt::info!("power on, init board...");
+    defmt::info!("VL53L8CX async driver starting (I2C bus, BlockingI2c wrapper)");
 
     // Clock config: HSI 16 MHz -> PLL -> 84 MHz SYSCLK
     let mut config = embassy_stm32::Config::default();
@@ -42,29 +45,20 @@ async fn main(_spawner: Spawner) {
 
     let p = embassy_stm32::init(config);
 
-    // Power-up sequence (matches blocking driver)
-    let mut pwr_en_c = Output::new(p.PA7, Level::Low, Speed::Low);
-    let _i2c_rst_c = Output::new(p.PB3, Level::Low, Speed::Low); // I2C_RST held low
+    // --- Center sensor control pins ---
+    let mut pwr_en_c = Output::new(p.PA7, Level::Low, Speed::Low); // PWR_EN_C
+    let _i2c_rst_c = Output::new(p.PB3, Level::Low, Speed::Low);  // I2C_RST held low
+    let lp_c = Output::new(p.PB0, Level::Low, Speed::Low);        // LPn center
+
+    // --- Power-up sequence ---
+    pwr_en_c.set_low();
     cortex_m::asm::delay(84_000 * 50);
     pwr_en_c.set_high();
     cortex_m::asm::delay(84_000 * 50);
-    // Keep power pin alive (i2c_rst_c stays low via _i2c_rst_c binding)
-    core::mem::forget(pwr_en_c);
 
-    // Reset pin (LPn center) — "active high" means pin HIGH = sensor enabled.
-    // Assert reset = pin LOW, deassert = pin HIGH.
-    let mut lp_c = Output::new(p.PB0, Level::Low, Speed::Low);
-    lp_c.set_low(); // assert reset
-    cortex_m::asm::delay(84_000 * 10);
-    lp_c.set_high(); // deassert reset, sensor boots
-    cortex_m::asm::delay(84_000 * 100);
-
-    // Async I2C1: PB8 = SCL, PB9 = SDA @ 400 kHz
-    // Read PCLK1 from RCC registers directly for diagnostics
-    let cfgr = unsafe { core::ptr::read_volatile(0x4002_3808 as *const u32) };
-    let ppre1 = (cfgr >> 10) & 0x7;
-    defmt::info!("RCC_CFGR: {:#010x}, PPRE1 bits: {}", cfgr, ppre1);
-
+    // I2C1: PB8 = SCL, PB9 = SDA @ 400 kHz
+    // Note: using BlockingI2c wrapper because embassy-stm32 async DMA I2C reads
+    // fail with Arbitration errors on STM32F4 I2C v1 peripherals.
     let mut i2c_config = i2c::Config::default();
     i2c_config.frequency = embassy_stm32::time::Hertz(400_000);
     let i2c = i2c::I2c::new(
@@ -77,67 +71,77 @@ async fn main(_spawner: Spawner) {
         i2c_config,
     );
 
-    // Use BlockingI2c wrapper to avoid STM32F4 I2C v1 async DMA read bug.
-    // The embassy async I2C driver (with DMA) fails on write_read with
-    // Arbitration errors on I2C v1 peripherals (F401, F1, F2, L1).
-    // BlockingI2c uses the blocking trait instead, which works correctly.
-    let mut sensor = Vl53l8cx::new(BlockingI2c(i2c), Delay);
+    let mut sensor = Vl53l8cx::new(BlockingI2c(i2c), Delay)
+        .with_reset_pin_active_high(lp_c);
 
-    defmt::info!("checking sensor is alive...");
-    match sensor.is_alive().await {
-        Ok(true) => defmt::info!("sensor is alive"),
-        Ok(false) => {
-            defmt::error!("sensor not alive");
-            return;
-        }
-        Err(e) => {
-            defmt::error!("is_alive error: {:?}", defmt::Debug2Format(&e));
-            return;
-        }
+    sensor.reset().await.unwrap();
+    cortex_m::asm::delay(84_000 * 100);
+
+    defmt::info!("Initialising sensor...");
+    if let Err(e) = sensor.init().await {
+        defmt::error!("Sensor init failed: {}", defmt::Debug2Format(&e));
+        defmt::error!("Check that X-NUCLEO-53L8A1 is connected and I2C jumpers are set");
+        loop {}
     }
 
-    defmt::info!("initializing sensor...");
-    match sensor.init().await {
-        Ok(()) => defmt::info!("sensor initialized successfully!"),
-        Err(e) => {
-            defmt::error!("init error: {:?}", defmt::Debug2Format(&e));
-            return;
-        }
+    let grid = match RESOLUTION {
+        Resolution::Res4x4 => 4usize,
+        Resolution::Res8x8 => 8,
+    };
+    defmt::info!("Configuring: {}x{} @ {} Hz", grid, grid, RANGING_FREQ_HZ);
+    if let Err(e) = sensor.set_resolution(RESOLUTION).await {
+        defmt::error!("set_resolution failed: {}", defmt::Debug2Format(&e));
+        loop {}
+    }
+    if let Err(e) = sensor.set_ranging_frequency_hz(RANGING_FREQ_HZ).await {
+        defmt::error!("set_ranging_frequency_hz failed: {}", defmt::Debug2Format(&e));
+        loop {}
+    }
+    if let Err(e) = sensor.start_ranging().await {
+        defmt::error!("start_ranging failed: {}", defmt::Debug2Format(&e));
+        loop {}
     }
 
-    defmt::info!("starting ranging...");
-    match sensor.start_ranging().await {
-        Ok(()) => defmt::info!("ranging started"),
-        Err(e) => {
-            defmt::error!("start_ranging error: {:?}", defmt::Debug2Format(&e));
-            return;
-        }
-    }
-
+    defmt::info!("Entering measurement loop");
     loop {
         match sensor.poll_data_ready().await {
             Ok(()) => {}
             Err(e) => {
-                defmt::error!("poll error: {:?}", defmt::Debug2Format(&e));
+                defmt::error!("Data ready check error: {}", defmt::Debug2Format(&e));
                 continue;
             }
         }
 
         match sensor.get_ranging_data().await {
             Ok(data) => {
-                // Print center zone distances (zones 27,28 for 8x8 or 5 for 4x4)
-                defmt::info!(
-                    "range: z0={}mm z27={}mm z28={}mm z63={}mm",
-                    data.distance_mm[0],
-                    data.distance_mm[27],
-                    data.distance_mm[28],
-                    data.distance_mm[63],
-                );
+                defmt::info!("--- Distance (mm) ---");
+                for row in 0..grid {
+                    let b = row * grid;
+                    match grid {
+                        4 => defmt::info!(
+                            "  {} {} {} {}",
+                            data.distance_mm[b],
+                            data.distance_mm[b + 1],
+                            data.distance_mm[b + 2],
+                            data.distance_mm[b + 3],
+                        ),
+                        _ => defmt::info!(
+                            "  {} {} {} {} {} {} {} {}",
+                            data.distance_mm[b],
+                            data.distance_mm[b + 1],
+                            data.distance_mm[b + 2],
+                            data.distance_mm[b + 3],
+                            data.distance_mm[b + 4],
+                            data.distance_mm[b + 5],
+                            data.distance_mm[b + 6],
+                            data.distance_mm[b + 7],
+                        ),
+                    }
+                }
             }
             Err(e) => {
-                defmt::error!("get_ranging_data error: {:?}", defmt::Debug2Format(&e));
+                defmt::error!("Ranging read error: {}", defmt::Debug2Format(&e));
             }
         }
     }
 }
-
