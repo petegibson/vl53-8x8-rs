@@ -474,6 +474,14 @@ where
 
 }
 
+/// Log data in 16-byte chunks when the `defmt` feature is enabled.
+#[cfg(feature = "defmt")]
+pub fn trace_data(data: &[u8]) {
+    for chunk in data.chunks(16) {
+        defmt::trace!("  {=[u8]:#04x}", chunk);
+    }
+}
+
 // --- Macro for Dynamic Platform Context ---
 #[macro_export]
 macro_rules! bind_platform_driver {
@@ -494,8 +502,19 @@ macro_rules! bind_platform_driver {
             let address = platform.address as u8;
 
             match embedded_hal::i2c::I2c::write_read(&mut comms.bus, address, &index_bytes, data_slice) {
-                Ok(_) => 0,
-                Err(_) => 1,
+                Ok(_) => {
+                    #[cfg(feature = "defmt")]
+                    {
+                        defmt::trace!("i2c R [{:#04x}] reg={:#06x} len={}", address, index, size);
+                        $crate::trace_data(data_slice);
+                    }
+                    0
+                }
+                Err(_) => {
+                    #[cfg(feature = "defmt")]
+                    defmt::trace!("i2c R [{:#04x}] reg={:#06x} -> ERR", address, index);
+                    1
+                }
             }
         }
 
@@ -514,6 +533,12 @@ macro_rules! bind_platform_driver {
             let index_bytes = index.to_be_bytes();
             let address = platform.address as u8;
 
+            #[cfg(feature = "defmt")]
+            {
+                defmt::trace!("i2c W [{:#04x}] reg={:#06x} len={}", address, index, size);
+                $crate::trace_data(data_slice);
+            }
+
             let mut operations = [
                 embedded_hal::i2c::Operation::Write(&index_bytes),
                 embedded_hal::i2c::Operation::Write(data_slice),
@@ -521,7 +546,11 @@ macro_rules! bind_platform_driver {
 
             match embedded_hal::i2c::I2c::transaction(&mut comms.bus, address, &mut operations) {
                 Ok(_) => 0,
-                Err(_) => 1,
+                Err(_) => {
+                    #[cfg(feature = "defmt")]
+                    defmt::trace!("i2c W -> ERR");
+                    1
+                }
             }
         }
 

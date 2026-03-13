@@ -2,7 +2,7 @@
 target = "thumbv7em-none-eabihf"
 
 [env]
-DEFMT_LOG = { value = "info", relative = false }
+DEFMT_LOG = { value = "info,vl53l8cx_sys=trace", relative = false }
 
 [target.thumbv7em-none-eabihf]
-runner = "probe-rs run --chip STM32F401RETx"
+runner = ["probe-rs", "run", "--chip", "STM32F401RETx", "--log-format", "{L:5} {s}"]

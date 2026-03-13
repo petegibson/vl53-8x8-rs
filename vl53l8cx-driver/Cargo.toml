@@ -8,6 +8,7 @@ description = "A platform-agnostic Rust driver for the STMicroelectronics VL53L8
 [dependencies]
 embedded-hal = "1.0.0" # Using the stable 1.0 version of the hardware abstraction layer.
 vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
+defmt = { version = "1", optional = true }
 
 # Make i2cdev optional
 i2cdev = { version = "0.6.2", optional = true }
