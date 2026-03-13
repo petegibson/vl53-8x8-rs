@@ -6,23 +6,26 @@ use panic_probe as _;
 
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::i2c;
 use embassy_time::Delay;
-use vl53l8cx_async::{BlockingI2c, Resolution, Vl53l8cx};
+use vl53l8cx_async::{Resolution, Vl53l8cx};
 
 // --- Configuration ---
 const RESOLUTION: Resolution = Resolution::Res4x4;
 const RANGING_FREQ_HZ: u8 = 10;
 
-// I2C1 interrupt bindings for async operation
+// I2C1 interrupt bindings
+#[cfg(not(feature = "spi-bus"))]
 embassy_stm32::bind_interrupts!(struct Irqs {
-    I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
-    I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
+    I2C1_EV => embassy_stm32::i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
+    I2C1_ER => embassy_stm32::i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
 });
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
+    #[cfg(not(feature = "spi-bus"))]
     defmt::info!("VL53L8CX async driver starting (I2C bus, BlockingI2c wrapper)");
+    #[cfg(feature = "spi-bus")]
+    defmt::info!("VL53L8CX async driver starting (SPI bus)");
 
     // Clock config: HSI 16 MHz -> PLL -> 84 MHz SYSCLK
     let mut config = embassy_stm32::Config::default();
@@ -47,8 +50,7 @@ async fn main(_spawner: Spawner) {
 
     // --- Center sensor control pins ---
     let mut pwr_en_c = Output::new(p.PA7, Level::Low, Speed::Low); // PWR_EN_C
-    let _i2c_rst_c = Output::new(p.PB3, Level::Low, Speed::Low);  // I2C_RST held low
-    let lp_c = Output::new(p.PB0, Level::Low, Speed::Low);        // LPn center
+    let lp_c = Output::new(p.PB0, Level::Low, Speed::Low);         // LPn center
 
     // --- Power-up sequence ---
     pwr_en_c.set_low();
@@ -56,23 +58,58 @@ async fn main(_spawner: Spawner) {
     pwr_en_c.set_high();
     cortex_m::asm::delay(84_000 * 50);
 
-    // I2C1: PB8 = SCL, PB9 = SDA @ 400 kHz
-    // Note: using BlockingI2c wrapper because embassy-stm32 async DMA I2C reads
-    // fail with Arbitration errors on STM32F4 I2C v1 peripherals.
-    let mut i2c_config = i2c::Config::default();
-    i2c_config.frequency = embassy_stm32::time::Hertz(400_000);
-    let i2c = i2c::I2c::new(
-        p.I2C1,
-        p.PB8,
-        p.PB9,
-        Irqs,
-        p.DMA1_CH6,
-        p.DMA1_CH0,
-        i2c_config,
-    );
+    // --- I2C mode (default) ---
+    #[cfg(not(feature = "spi-bus"))]
+    let mut sensor = {
+        let _i2c_rst_c = Output::new(p.PB3, Level::Low, Speed::Low); // I2C_RST held low
 
-    let mut sensor = Vl53l8cx::new(BlockingI2c(i2c), Delay)
-        .with_reset_pin_active_high(lp_c);
+        let mut i2c_config = embassy_stm32::i2c::Config::default();
+        i2c_config.frequency = embassy_stm32::time::Hertz(400_000);
+        let i2c = embassy_stm32::i2c::I2c::new(
+            p.I2C1,
+            p.PB8,
+            p.PB9,
+            Irqs,
+            p.DMA1_CH6,
+            p.DMA1_CH0,
+            i2c_config,
+        );
+
+        Vl53l8cx::new(vl53l8cx_async::BlockingI2c(i2c), Delay)
+            .with_reset_pin_active_high(lp_c)
+    };
+
+    // --- SPI mode ---
+    #[cfg(feature = "spi-bus")]
+    let mut sensor = {
+        use embassy_stm32::spi;
+        use embedded_hal_bus::spi::ExclusiveDevice;
+
+        // SPI1: PB3=SCK, PB4=MISO, PB5=MOSI, Mode 3, 1 MHz
+        let mut spi_config = spi::Config::default();
+        spi_config.mode = spi::Mode {
+            polarity: spi::Polarity::IdleHigh,
+            phase: spi::Phase::CaptureOnSecondTransition,
+        };
+        spi_config.frequency = embassy_stm32::time::Hertz(1_000_000);
+
+        let spi = spi::Spi::new(
+            p.SPI1,
+            p.PB3,  // SCK
+            p.PB5,  // MOSI
+            p.PB4,  // MISO
+            p.DMA2_CH3, // TX
+            p.DMA2_CH0, // RX
+            spi_config,
+        );
+
+        // NCS on PB6
+        let cs = Output::new(p.PB6, Level::High, Speed::VeryHigh);
+        let spi_device = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
+
+        Vl53l8cx::new_spi(spi_device, Delay)
+            .with_reset_pin_active_high(lp_c)
+    };
 
     sensor.reset().await.unwrap();
     cortex_m::asm::delay(84_000 * 100);
@@ -80,7 +117,10 @@ async fn main(_spawner: Spawner) {
     defmt::info!("Initialising sensor...");
     if let Err(e) = sensor.init().await {
         defmt::error!("Sensor init failed: {}", defmt::Debug2Format(&e));
+        #[cfg(not(feature = "spi-bus"))]
         defmt::error!("Check that X-NUCLEO-53L8A1 is connected and I2C jumpers are set");
+        #[cfg(feature = "spi-bus")]
+        defmt::error!("Check that X-NUCLEO-53L8A1 is connected and SPI jumpers are set");
         loop {}
     }
 

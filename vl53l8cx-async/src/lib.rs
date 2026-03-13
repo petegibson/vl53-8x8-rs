@@ -60,6 +60,25 @@ where
     }
 }
 
+impl<SPI, D> Vl53l8cx<Vl53l8cxSpiDevice<SPI>, D, NoPin, NoPin>
+where
+    SPI: embedded_hal_async::spi::SpiDevice,
+    D: DelayNs,
+{
+    pub fn new_spi(spi: SPI, delay: D) -> Self {
+        Self {
+            bus: Vl53l8cxSpiDevice { spi },
+            delay,
+            address: DEFAULT_ADDRESS,
+            reset_pin: NoPin,
+            int_pin: NoPin,
+            lp_is_reset_high: false,
+            int_is_data_ready_high: false,
+            stdev: unsafe { core::mem::zeroed() },
+        }
+    }
+}
+
 // --- Builder methods ---
 
 impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
