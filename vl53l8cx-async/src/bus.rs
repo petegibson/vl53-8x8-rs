@@ -86,18 +86,6 @@ impl<T: I2c> VlBusAsync for T {
 /// ```
 pub struct BlockingI2c<T>(pub T);
 
-/// Brief busy-wait between back-to-back I2C transactions.
-///
-/// Without this, pure-Rust blocking I2C can fire transactions faster than
-/// the VL53L8CX can process them — the C driver's FFI overhead provides
-/// this implicitly. 20 nops ≈ a few hundred ns at typical Cortex-M speeds.
-#[inline(always)]
-fn i2c_inter_transaction_delay() {
-    for _ in 0..20 {
-        core::hint::black_box(());
-    }
-}
-
 impl<T: embedded_hal::i2c::I2c> VlBusAsync for BlockingI2c<T> {
     type Error = <T as embedded_hal::i2c::ErrorType>::Error;
 
@@ -124,7 +112,6 @@ impl<T: embedded_hal::i2c::I2c> VlBusAsync for BlockingI2c<T> {
         if result.is_err() {
             defmt::trace!("i2c W -> ERR");
         }
-        i2c_inter_transaction_delay();
         result
     }
 
@@ -138,7 +125,6 @@ impl<T: embedded_hal::i2c::I2c> VlBusAsync for BlockingI2c<T> {
         } else {
             defmt::trace!("i2c R [{:#04x}] reg={:#06x} -> ERR", addr, reg);
         }
-        i2c_inter_transaction_delay();
         result
     }
 }
