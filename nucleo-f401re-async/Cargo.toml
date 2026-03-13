@@ -21,6 +21,10 @@ default = []
 spi-bus = ["dep:embedded-hal-bus"]
 defmt-bus-trace = ["vl53l8cx-async/defmt"]
 
+[[bin]]
+name = "nucleo-f401re-async"
+test = false
+
 [dev-dependencies]
 embedded-test = { version = "0.7", features = ["defmt", "embassy"] }
 

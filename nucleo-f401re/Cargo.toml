@@ -18,7 +18,7 @@ panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
 embedded-test = { version = "0.7", features = ["defmt"] }
 
 [features]
-default = ["dep:panic-probe", "defmt"]
+default = ["dep:panic-probe"]
 defmt-bus-trace = ["vl53l8cx-driver/defmt"]
 spi-bus = ["dep:embedded-hal-bus", "dep:panic-probe"]
 

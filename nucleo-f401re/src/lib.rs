@@ -74,13 +74,11 @@ pub fn board_init() -> Sensor {
 
     // --- Center sensor control pins ---
     let mut pwr_en_c = gpioa.pa7.into_push_pull_output(); // PWR_EN_C
-    let mut i2c_rst_c = gpiob.pb3.into_push_pull_output(); // I2C_RST
     let lp_c = gpiob.pb0.into_push_pull_output(); // LPn center
     let int_c = gpioa.pa4.into_pull_up_input(); // INT center
 
     // --- Power-up sequence ---
     pwr_en_c.set_low();
-    i2c_rst_c.set_low();
     cortex_m::asm::delay(84_000 * 50);
 
     pwr_en_c.set_high();
@@ -95,7 +93,7 @@ pub fn board_init() -> Sensor {
     );
 
     let mut sensor = Vl53l8cx::new(i2c, delay)
-        .with_reset_pin_active_high(lp_c)
+        .with_reset_pin_active_low(lp_c)
         .with_interrupt_pin_active_low(int_c);
 
     sensor.reset().unwrap();
@@ -124,7 +122,7 @@ pub fn board_init() -> Sensor {
 
     // PWR_EN_C
     let mut pwr_en_c = gpioa.pa7.into_push_pull_output();
-    // LPn center (reset, active high)
+    // LPn center (reset active low, HIGH = enabled)
     let lp_c = gpiob.pb0.into_push_pull_output();
     // INT center
     let int_c = gpioa.pa4.into_pull_up_input();
@@ -153,7 +151,7 @@ pub fn board_init() -> Sensor {
     let spi_device = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
 
     let mut sensor = Vl53l8cx::new_spi(spi_device, delay)
-        .with_reset_pin_active_high(lp_c)
+        .with_reset_pin_active_low(lp_c)
         .with_interrupt_pin_active_low(int_c);
 
     sensor.reset().unwrap();

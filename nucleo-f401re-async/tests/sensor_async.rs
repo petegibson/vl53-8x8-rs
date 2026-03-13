@@ -3,84 +3,179 @@
 
 use defmt_rtt as _;
 
-use embassy_stm32::i2c;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_time::Delay;
 use vl53l8cx_async::{PowerMode, RangingMode, Resolution, TargetOrder, Vl53l8cx};
 
-// I2C1 interrupt bindings for async operation
-embassy_stm32::bind_interrupts!(struct Irqs {
-    I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
-    I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
-});
+// --- I2C mode (default) ---
 
-type AsyncSensor<'d> = Vl53l8cx<
-    embassy_stm32::i2c::I2c<'d, embassy_stm32::mode::Async>,
-    Delay,
-    Output<'d>,
-    embassy_stm32::gpio::Input<'d>,
->;
+#[cfg(not(feature = "spi-bus"))]
+mod bus_setup {
+    use super::*;
+    use embassy_stm32::i2c;
+    use vl53l8cx_async::BlockingI2c;
 
-fn board_init_async() -> AsyncSensor<'static> {
-    // Clock config: HSI 16 MHz -> PLL -> 84 MHz SYSCLK
+    embassy_stm32::bind_interrupts!(struct Irqs {
+        I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
+        I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
+    });
+
+    pub type Sensor = Vl53l8cx<
+        BlockingI2c<i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>>,
+        Delay,
+        Output<'static>,
+        embassy_stm32::gpio::Input<'static>,
+    >;
+
+    pub fn init_bus(p: &mut embassy_stm32::Peripherals) -> Sensor {
+        let _i2c_rst_c = Output::new(
+            unsafe { core::ptr::read(&raw const p.PB3) },
+            Level::Low,
+            Speed::Low,
+        );
+        core::mem::forget(_i2c_rst_c);
+
+        let int_c = embassy_stm32::gpio::Input::new(
+            unsafe { core::ptr::read(&raw const p.PA4) },
+            Pull::Up,
+        );
+
+        let mut i2c_config = i2c::Config::default();
+        i2c_config.frequency = embassy_stm32::time::Hertz(400_000);
+        let i2c = i2c::I2c::new(
+            unsafe { core::ptr::read(&raw const p.I2C1) },
+            unsafe { core::ptr::read(&raw const p.PB8) },
+            unsafe { core::ptr::read(&raw const p.PB9) },
+            Irqs,
+            unsafe { core::ptr::read(&raw const p.DMA1_CH6) },
+            unsafe { core::ptr::read(&raw const p.DMA1_CH0) },
+            i2c_config,
+        );
+
+        let mut lp_c = Output::new(
+            unsafe { core::ptr::read(&raw const p.PB0) },
+            Level::Low,
+            Speed::Low,
+        );
+        // LPn LOW = sensor in reset, HIGH = sensor enabled (datasheet).
+        // Pulse reset then leave HIGH so sensor is ready for init().
+        lp_c.set_low();
+        cortex_m::asm::delay(84_000 * 10);
+        lp_c.set_high();
+        cortex_m::asm::delay(84_000 * 100);
+
+        Vl53l8cx::new(BlockingI2c(i2c), Delay)
+            .with_reset_pin_active_low(lp_c)
+            .with_interrupt_pin_active_low(int_c)
+    }
+}
+
+// --- SPI mode ---
+
+#[cfg(feature = "spi-bus")]
+mod bus_setup {
+    use super::*;
+    use embassy_stm32::spi;
+    use embedded_hal_bus::spi::ExclusiveDevice;
+    use vl53l8cx_async::Vl53l8cxSpiDevice;
+
+    type SpiDev = ExclusiveDevice<
+        spi::Spi<'static, embassy_stm32::mode::Async, embassy_stm32::spi::mode::Master>,
+        Output<'static>,
+        embedded_hal_bus::spi::NoDelay,
+    >;
+
+    pub type Sensor = Vl53l8cx<
+        Vl53l8cxSpiDevice<SpiDev>,
+        Delay,
+        Output<'static>,
+        embassy_stm32::gpio::Input<'static>,
+    >;
+
+    pub fn init_bus(p: &mut embassy_stm32::Peripherals) -> Sensor {
+        let int_c = embassy_stm32::gpio::Input::new(
+            unsafe { core::ptr::read(&raw const p.PA4) },
+            Pull::Up,
+        );
+
+        let mut spi_config = spi::Config::default();
+        spi_config.mode = spi::Mode {
+            polarity: spi::Polarity::IdleHigh,
+            phase: spi::Phase::CaptureOnSecondTransition,
+        };
+        spi_config.frequency = embassy_stm32::time::Hertz(1_000_000);
+
+        let spi = spi::Spi::new(
+            unsafe { core::ptr::read(&raw const p.SPI1) },
+            unsafe { core::ptr::read(&raw const p.PB3) },  // SCK
+            unsafe { core::ptr::read(&raw const p.PB5) },  // MOSI
+            unsafe { core::ptr::read(&raw const p.PB4) },  // MISO
+            unsafe { core::ptr::read(&raw const p.DMA2_CH3) }, // TX
+            unsafe { core::ptr::read(&raw const p.DMA2_CH0) }, // RX
+            spi_config,
+        );
+
+        let cs = Output::new(
+            unsafe { core::ptr::read(&raw const p.PB6) },
+            Level::High,
+            Speed::VeryHigh,
+        );
+        let spi_device = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
+
+        let mut lp_c = Output::new(
+            unsafe { core::ptr::read(&raw const p.PB0) },
+            Level::Low,
+            Speed::Low,
+        );
+        // LPn LOW = sensor in reset, HIGH = sensor enabled (datasheet).
+        // Pulse reset then leave HIGH so sensor is ready for init().
+        lp_c.set_low();
+        cortex_m::asm::delay(84_000 * 10);
+        lp_c.set_high();
+        cortex_m::asm::delay(84_000 * 100);
+
+        Vl53l8cx::new_spi(spi_device, Delay)
+            .with_reset_pin_active_low(lp_c)
+            .with_interrupt_pin_active_low(int_c)
+    }
+}
+
+use bus_setup::Sensor;
+
+fn board_init_async() -> Sensor {
     let mut config = embassy_stm32::Config::default();
     {
         use embassy_stm32::rcc::*;
         config.rcc.hsi = true;
         config.rcc.pll_src = PllSource::HSI;
         config.rcc.pll = Some(Pll {
-            prediv: PllPreDiv::DIV16,   // 16 MHz / 16 = 1 MHz
-            mul: PllMul::MUL336,        // 1 MHz * 336 = 336 MHz VCO
-            divp: Some(PllPDiv::DIV4),  // 336 / 4 = 84 MHz SYSCLK
-            divq: Some(PllQDiv::DIV7),  // 336 / 7 = 48 MHz (USB)
+            prediv: PllPreDiv::DIV16,
+            mul: PllMul::MUL336,
+            divp: Some(PllPDiv::DIV4),
+            divq: Some(PllQDiv::DIV7),
             divr: None,
         });
         config.rcc.sys = Sysclk::PLL1_P;
-        config.rcc.ahb_pre = AHBPrescaler::DIV1;   // 84 MHz
-        config.rcc.apb1_pre = APBPrescaler::DIV2;   // 42 MHz
-        config.rcc.apb2_pre = APBPrescaler::DIV1;   // 84 MHz
+        config.rcc.ahb_pre = AHBPrescaler::DIV1;
+        config.rcc.apb1_pre = APBPrescaler::DIV2;
+        config.rcc.apb2_pre = APBPrescaler::DIV1;
     }
 
-    let p = embassy_stm32::init(config);
+    let mut p = embassy_stm32::init(config);
 
     // Power-up sequence
-    let mut pwr_en_c = Output::new(p.PA7, Level::Low, Speed::Low);
+    let mut pwr_en_c = Output::new(
+        unsafe { core::ptr::read(&raw const p.PA7) },
+        Level::Low,
+        Speed::Low,
+    );
+    pwr_en_c.set_low();
     cortex_m::asm::delay(84_000 * 50);
     pwr_en_c.set_high();
     cortex_m::asm::delay(84_000 * 50);
-    // Keep pwr_en_c alive (leak it so it doesn't get dropped)
     core::mem::forget(pwr_en_c);
 
-    // Reset pin (LPn center) — active-high reset: assert high, delay, deassert low
-    let mut lp_c = Output::new(p.PB0, Level::Low, Speed::Low);
-    lp_c.set_high(); // assert reset
-    cortex_m::asm::delay(84_000 * 10);
-    lp_c.set_low(); // deassert reset
-    cortex_m::asm::delay(84_000 * 100);
-
-    let int_c = embassy_stm32::gpio::Input::new(p.PA4, Pull::Up);
-
-    // Async I2C1: PB8 = SCL, PB9 = SDA @ 400 kHz
-    // Read PCLK1 from RCC registers directly for diagnostics
-    let cfgr = unsafe { core::ptr::read_volatile(0x4002_3808 as *const u32) };
-    let ppre1 = (cfgr >> 10) & 0x7;
-    defmt::info!("RCC_CFGR: {:#010x}, PPRE1 bits: {}", cfgr, ppre1);
-    let i2c = i2c::I2c::new(
-        p.I2C1,
-        p.PB8,
-        p.PB9,
-        Irqs,
-        p.DMA1_CH6,
-        p.DMA1_CH0,
-        embassy_stm32::time::Hertz(400_000),
-        i2c::Config::default(),
-    );
-
-    let sensor = Vl53l8cx::new(i2c, Delay)
-        .with_reset_pin_active_high(lp_c)
-        .with_interrupt_pin_active_low(int_c);
-
-    sensor
+    bus_setup::init_bus(&mut p)
 }
 
 #[embedded_test::tests]
@@ -88,28 +183,34 @@ mod tests {
     use super::*;
 
     #[init]
-    fn init() -> AsyncSensor<'static> {
+    fn init() -> Sensor {
         board_init_async()
     }
 
     #[test]
     #[timeout(5)]
-    async fn test_sensor_alive(mut sensor: AsyncSensor<'static>) {
-        defmt::assert!(
-            sensor.is_alive().await.unwrap(),
-            "sensor.is_alive failed, check X-NUCLEO-53L8A1 is connected and I2C jumpers are set"
-        );
+    async fn test_sensor_alive(mut sensor: Sensor) {
+        match sensor.is_alive().await {
+            Ok(alive) => defmt::assert!(
+                alive,
+                "sensor.is_alive returned false, check X-NUCLEO-53L8A1 is connected"
+            ),
+            Err(e) => {
+                defmt::error!("is_alive error: {}", defmt::Debug2Format(&e));
+                panic!("is_alive failed");
+            }
+        }
     }
 
     #[test]
     #[timeout(10)]
-    async fn test_init(mut sensor: AsyncSensor<'static>) {
+    async fn test_init(mut sensor: Sensor) {
         sensor.init().await.unwrap();
     }
 
     #[test]
     #[timeout(10)]
-    async fn test_set_resolution(mut sensor: AsyncSensor<'static>) {
+    async fn test_set_resolution(mut sensor: Sensor) {
         sensor.init().await.unwrap();
 
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
@@ -121,7 +222,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_4x4(mut sensor: AsyncSensor<'static>) {
+    async fn test_ranging_4x4(mut sensor: Sensor) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -144,7 +245,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_8x8(mut sensor: AsyncSensor<'static>) {
+    async fn test_ranging_8x8(mut sensor: Sensor) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res8x8).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -167,7 +268,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ambient_light(mut sensor: AsyncSensor<'static>) {
+    async fn test_ambient_light(mut sensor: Sensor) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -185,7 +286,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_frequency(mut sensor: AsyncSensor<'static>) {
+    async fn test_ranging_frequency(mut sensor: Sensor) {
         sensor.init().await.unwrap();
 
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -200,7 +301,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_target_order(mut sensor: AsyncSensor<'static>) {
+    async fn test_target_order(mut sensor: Sensor) {
         sensor.init().await.unwrap();
 
         sensor.set_target_order(TargetOrder::Closest).await.unwrap();
@@ -212,7 +313,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_mode(mut sensor: AsyncSensor<'static>) {
+    async fn test_ranging_mode(mut sensor: Sensor) {
         sensor.init().await.unwrap();
 
         sensor.set_ranging_mode(RangingMode::Continuous).await.unwrap();
@@ -224,7 +325,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_integration_time(mut sensor: AsyncSensor<'static>) {
+    async fn test_integration_time(mut sensor: Sensor) {
         sensor.init().await.unwrap();
 
         sensor.set_integration_time_ms(20).await.unwrap();
@@ -236,7 +337,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_sharpener_percent(mut sensor: AsyncSensor<'static>) {
+    async fn test_sharpener_percent(mut sensor: Sensor) {
         sensor.init().await.unwrap();
 
         sensor.set_sharpener_percent(25).await.unwrap();
@@ -250,7 +351,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_power_mode(mut sensor: AsyncSensor<'static>) {
+    async fn test_power_mode(mut sensor: Sensor) {
         sensor.init().await.unwrap();
 
         assert_eq!(sensor.get_power_mode().await.unwrap(), PowerMode::Wakeup);

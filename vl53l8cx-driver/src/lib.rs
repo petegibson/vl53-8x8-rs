@@ -179,7 +179,7 @@ where
     <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
     fn set_reset_state(&mut self, target_state_reset: bool) -> Result<(), Error<E>> {
-        let set_pin_high = target_state_reset ^ self.lp_is_reset_high;
+        let set_pin_high = target_state_reset == self.lp_is_reset_high;
         let result = if set_pin_high {
             self.reset_pin.set_high()
         } else {

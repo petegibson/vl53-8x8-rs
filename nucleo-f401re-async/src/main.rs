@@ -61,8 +61,6 @@ async fn main(_spawner: Spawner) {
     // --- I2C mode (default) ---
     #[cfg(not(feature = "spi-bus"))]
     let mut sensor = {
-        let _i2c_rst_c = Output::new(p.PB3, Level::Low, Speed::Low); // I2C_RST held low
-
         let mut i2c_config = embassy_stm32::i2c::Config::default();
         i2c_config.frequency = embassy_stm32::time::Hertz(400_000);
         let i2c = embassy_stm32::i2c::I2c::new(
@@ -76,7 +74,7 @@ async fn main(_spawner: Spawner) {
         );
 
         Vl53l8cx::new(vl53l8cx_async::BlockingI2c(i2c), Delay)
-            .with_reset_pin_active_high(lp_c)
+            .with_reset_pin_active_low(lp_c)
     };
 
     // --- SPI mode ---
@@ -108,7 +106,7 @@ async fn main(_spawner: Spawner) {
         let spi_device = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
 
         Vl53l8cx::new_spi(spi_device, Delay)
-            .with_reset_pin_active_high(lp_c)
+            .with_reset_pin_active_low(lp_c)
     };
 
     sensor.reset().await.unwrap();
