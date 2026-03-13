@@ -440,6 +440,7 @@ name = "vl53l8cx-driver"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "defmt",
  "embedded-hal",
  "i2cdev",
  "vl53l8cx-sys",

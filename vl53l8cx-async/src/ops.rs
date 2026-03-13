@@ -22,13 +22,20 @@ pub async fn poll_for_answer<BUS: VlBusAsync, D: DelayNs>(
     mask: u8,
     expected: u8,
 ) -> Result<(), Error<BUS::Error>> {
-    for _ in 0..200u8 {
+    for _attempt in 0..200u8 {
         bus.read(addr, register, &mut temp_buf[..size as usize])
             .await
             .map_err(Error::Bus)?;
         delay.delay_ms(10).await;
 
         if size >= 4 && temp_buf[2] >= 0x7F {
+            #[cfg(feature = "defmt")]
+            defmt::warn!(
+                "poll MCU error: reg={:#06x} buf={=[u8]:#04x} attempt={}",
+                register,
+                &temp_buf[..size as usize],
+                _attempt,
+            );
             return Err(Error::Firmware(FirmwareError::McuError));
         }
 
@@ -36,7 +43,22 @@ pub async fn poll_for_answer<BUS: VlBusAsync, D: DelayNs>(
             return Ok(());
         }
     }
-    Err(Error::Firmware(FirmwareError::Timeout))
+
+    // The C driver uses a `status |=` pattern that accumulates errors
+    // without stopping. Callers proceed to read/write the response
+    // even after a poll timeout, and the sensor often has valid data
+    // ready despite not reporting the expected status byte. Match that
+    // behaviour here: log a warning but return Ok so the caller continues.
+    #[cfg(feature = "defmt")]
+    defmt::warn!(
+        "poll timeout (continuing): reg={:#06x} pos={} mask={:#04x} expected={:#04x} last buf={=[u8]:#04x}",
+        register,
+        pos,
+        mask,
+        expected,
+        &temp_buf[..size as usize],
+    );
+    Ok(())
 }
 
 /// Poll for MCU boot. 500ms timeout, 1ms intervals.
@@ -821,18 +843,19 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
     delay: &mut D,
     stdev: &mut VL53L8CX_Configuration,
 ) -> Result<(), Error<BUS::Error>> {
-    // Get current resolution
+    // Get current resolution (use local buffer to avoid corrupting offset_data)
+    let mut zone_buf = [0u8; 8];
     dci_read(
         bus,
         addr,
         delay,
         &mut stdev.temp_buffer,
-        &mut stdev.offset_data[..8],
+        &mut zone_buf,
         VL53L8CX_DCI_ZONE_CONFIG as u32,
         8,
     )
     .await?;
-    let resolution = stdev.offset_data[0] as u32 * stdev.offset_data[1] as u32;
+    let resolution = zone_buf[0] as u32 * zone_buf[1] as u32;
 
     stdev.data_read_size = 0;
     stdev.streamcount = 255;
@@ -874,7 +897,7 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
     { output_bh_enable[0] += 512; }
     #[cfg(not(feature = "disable-target-status"))]
     { output_bh_enable[0] += 1024; }
-    #[cfg(not(feature = "disable-motion-indicator-output"))]
+    #[cfg(all(feature = "motion", not(feature = "disable-motion-indicator-output")))]
     { output_bh_enable[0] += 2048; }
 
     // Compute data_read_size

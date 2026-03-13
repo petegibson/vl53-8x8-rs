@@ -270,64 +270,68 @@ where
 
     pub async fn set_resolution(&mut self, resolution: Resolution) -> Result<(), Error<BUS::Error>> {
         let res = resolution as u8;
+        // Use local buffers for DCI operations — NOT stdev.offset_data,
+        // which holds calibration data needed by send_offset_data later.
+        let mut dss_buf = [0u8; 16];
+        let mut zone_buf = [0u8; 8];
         match resolution {
             Resolution::Res4x4 => {
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..16],
+                    &mut self.stdev.temp_buffer, &mut dss_buf,
                     sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
-                self.stdev.offset_data[0x04] = 64;
-                self.stdev.offset_data[0x06] = 64;
-                self.stdev.offset_data[0x09] = 4;
+                dss_buf[0x04] = 64;
+                dss_buf[0x06] = 64;
+                dss_buf[0x09] = 4;
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..16],
+                    &mut self.stdev.temp_buffer, &mut dss_buf,
                     sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
 
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..8],
+                    &mut self.stdev.temp_buffer, &mut zone_buf,
                     sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
-                self.stdev.offset_data[0x00] = 4;
-                self.stdev.offset_data[0x01] = 4;
-                self.stdev.offset_data[0x04] = 8;
-                self.stdev.offset_data[0x05] = 8;
+                zone_buf[0x00] = 4;
+                zone_buf[0x01] = 4;
+                zone_buf[0x04] = 8;
+                zone_buf[0x05] = 8;
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..8],
+                    &mut self.stdev.temp_buffer, &mut zone_buf,
                     sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
             }
             Resolution::Res8x8 => {
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..16],
+                    &mut self.stdev.temp_buffer, &mut dss_buf,
                     sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
-                self.stdev.offset_data[0x04] = 16;
-                self.stdev.offset_data[0x06] = 16;
-                self.stdev.offset_data[0x09] = 1;
+                dss_buf[0x04] = 16;
+                dss_buf[0x06] = 16;
+                dss_buf[0x09] = 1;
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..16],
+                    &mut self.stdev.temp_buffer, &mut dss_buf,
                     sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
 
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..8],
+                    &mut self.stdev.temp_buffer, &mut zone_buf,
                     sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
-                self.stdev.offset_data[0x00] = 8;
-                self.stdev.offset_data[0x01] = 8;
-                self.stdev.offset_data[0x04] = 4;
-                self.stdev.offset_data[0x05] = 4;
+                zone_buf[0x00] = 8;
+                zone_buf[0x01] = 8;
+                zone_buf[0x04] = 4;
+                zone_buf[0x05] = 4;
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut self.stdev.offset_data[..8],
+                    &mut self.stdev.temp_buffer, &mut zone_buf,
                     sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
             }
