@@ -19,7 +19,7 @@ embedded-test = { version = "0.7", features = ["defmt"] }
 
 [features]
 default = ["dep:panic-probe", "defmt"]
-i2c-defmt-trace = ["vl53l8cx-driver/defmt"]
+defmt-bus-trace = ["vl53l8cx-driver/defmt"]
 spi-bus = ["dep:embedded-hal-bus", "dep:panic-probe"]
 
 [lib]

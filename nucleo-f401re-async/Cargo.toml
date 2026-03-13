@@ -19,7 +19,7 @@ vl53l8cx-async = { path = "../vl53l8cx-async" }
 [features]
 default = []
 spi-bus = ["dep:embedded-hal-bus"]
-defmt-trace = ["vl53l8cx-async/defmt"]
+defmt-bus-trace = ["vl53l8cx-async/defmt"]
 
 [dev-dependencies]
 embedded-test = { version = "0.7", features = ["defmt", "embassy"] }
