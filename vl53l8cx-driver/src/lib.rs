@@ -8,7 +8,7 @@ ST Microelectronics VL53L8CX ULD (Ultra Lite Driver) via the `vl53l8cx-sys` crat
 
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{InputPin, OutputPin};
-use embedded_hal::i2c::I2c;
+use embedded_hal::i2c::{I2c, SevenBitAddress};
 use embedded_hal::spi::SpiDevice;
 
 // We import the sys crate internally but do NOT make it public.
@@ -58,7 +58,7 @@ pub struct Vl53l8cxComms<BUS, D> {
 
 pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     pub comms: Vl53l8cxComms<BUS, D>,
-    address: u16,
+    address: SevenBitAddress,
     reset_pin: RST,
     int_pin: INT,
     lp_is_reset_high: bool,
@@ -74,7 +74,7 @@ where
     pub fn new(i2c: BUS, delay: D) -> Self {
         Self {
             comms: Vl53l8cxComms { bus: i2c, delay },
-            address: DEFAULT_ADDRESS as u16,
+            address: DEFAULT_ADDRESS,
             reset_pin: NoPin,
             int_pin: NoPin,
             lp_is_reset_high: false,
@@ -92,7 +92,7 @@ where
     pub fn new_spi(spi: SPI, delay: D) -> Self {
         Self {
             comms: Vl53l8cxComms { bus: Vl53l8cxSpiDevice { spi }, delay },
-            address: DEFAULT_ADDRESS as u16,
+            address: DEFAULT_ADDRESS,
             reset_pin: NoPin,
             int_pin: NoPin,
             lp_is_reset_high: false,
@@ -195,22 +195,41 @@ where
         Ok(())
     }
 
-    pub fn set_address(&mut self, new_address: u8) -> Result<(), Error<E>> {
-        self.set_reset_state(true)?;
-        self.comms.delay.delay_ms(2);
-        self.set_reset_state(false)?;
-        self.comms.delay.delay_ms(2);
-
+    pub fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<E>> {
+        // Bypass the C vl53l8cx_set_i2c_address() because it stores an 8-bit
+        // address in platform.address mid-call, which our platform callbacks
+        // interpret as 7-bit, breaking the third write.
         self.bind_platform();
+        let mut val: u8 = 0x00;
         let status = unsafe {
-            sys::vl53l8cx_set_i2c_address(&mut self.stdev, new_address as u16)
+            sys::vl53l8cx_platform_write(
+                &mut self.stdev.platform, 0x7FFF, &mut val, 1,
+            )
         };
+        if status != 0 { return Err(Error::Firmware(status.into())); }
 
-        if status != 0 {
-            return Err(Error::Firmware(status.into()));
-        }
-        self.address = new_address as u16;
+        // Register 0x04 takes the 7-bit address directly.
+        let mut val: u8 = new_address;
+        let status = unsafe {
+            sys::vl53l8cx_platform_write(
+                &mut self.stdev.platform, 0x0004, &mut val, 1,
+            )
+        };
+        if status != 0 { return Err(Error::Firmware(status.into())); }
+
+        // Switch to the new address for the final write.
+        self.address = new_address;
         self.stdev.platform.address = new_address as u16;
+        self.bind_platform();
+
+        let mut val: u8 = 0x02;
+        let status = unsafe {
+            sys::vl53l8cx_platform_write(
+                &mut self.stdev.platform, 0x7FFF, &mut val, 1,
+            )
+        };
+        if status != 0 { return Err(Error::Firmware(status.into())); }
+
         Ok(())
     }
 }
@@ -223,7 +242,7 @@ where
     #[inline]
     fn bind_platform(&mut self) {
         self.stdev.platform.p_com = &mut self.comms as *mut _ as *mut core::ffi::c_void;
-        self.stdev.platform.address = self.address;
+        self.stdev.platform.address = self.address as u16;
     }
 
     pub fn start_ranging(&mut self) -> Result<(), Error<E>> {
@@ -445,7 +464,7 @@ where
     }
 
     pub fn init(&mut self) -> Result<(), Error<E>> {
-        self.stdev.platform.address = self.address;
+        self.stdev.platform.address = self.address as u16;
         self.bind_platform();
 
         if !self.is_alive()? {
