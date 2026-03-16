@@ -48,7 +48,7 @@ fn main() -> Result<()> {
         measurement: ThresholdMeasurement::DistanceMm,
         threshold_type: ThresholdType::LessThanEqualMin,
         zone_num: TARGET_ZONE,
-        mathematic_operation: ThresholdOperation::Or, // First threshold must be OR
+        mathematic_operation: ThresholdOperation::None, // First threshold: no prior operation
     };
 
     // 3. Mark the end of the threshold list immediately after the active one
