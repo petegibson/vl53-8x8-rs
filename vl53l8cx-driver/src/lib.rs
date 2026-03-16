@@ -196,40 +196,15 @@ where
     }
 
     pub fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<E>> {
-        // Bypass the C vl53l8cx_set_i2c_address() because it stores an 8-bit
-        // address in platform.address mid-call, which our platform callbacks
-        // interpret as 7-bit, breaking the third write.
         self.bind_platform();
-        let mut val: u8 = 0x00;
+        let i2c_address_8bit = (new_address as u16) << 1;
         let status = unsafe {
-            sys::vl53l8cx_platform_write(
-                &mut self.stdev.platform, 0x7FFF, &mut val, 1,
-            )
+            sys::vl53l8cx_set_i2c_address(&mut self.stdev, i2c_address_8bit)
         };
-        if status != 0 { return Err(Error::Firmware(status.into())); }
-
-        // Register 0x04 takes the 7-bit address directly.
-        let mut val: u8 = new_address;
-        let status = unsafe {
-            sys::vl53l8cx_platform_write(
-                &mut self.stdev.platform, 0x0004, &mut val, 1,
-            )
-        };
-        if status != 0 { return Err(Error::Firmware(status.into())); }
-
-        // Switch to the new address for the final write.
+        if status != 0 {
+            return Err(Error::Firmware(status.into()));
+        }
         self.address = new_address;
-        self.stdev.platform.address = new_address as u16;
-        self.bind_platform();
-
-        let mut val: u8 = 0x02;
-        let status = unsafe {
-            sys::vl53l8cx_platform_write(
-                &mut self.stdev.platform, 0x7FFF, &mut val, 1,
-            )
-        };
-        if status != 0 { return Err(Error::Firmware(status.into())); }
-
         Ok(())
     }
 }
@@ -242,7 +217,7 @@ where
     #[inline]
     fn bind_platform(&mut self) {
         self.stdev.platform.p_com = &mut self.comms as *mut _ as *mut core::ffi::c_void;
-        self.stdev.platform.address = self.address as u16;
+        self.stdev.platform.address = (self.address as u16) << 1;
     }
 
     pub fn start_ranging(&mut self) -> Result<(), Error<E>> {
@@ -464,7 +439,7 @@ where
     }
 
     pub fn init(&mut self) -> Result<(), Error<E>> {
-        self.stdev.platform.address = self.address as u16;
+        self.stdev.platform.address = (self.address as u16) << 1;
         self.bind_platform();
 
         if !self.is_alive()? {
@@ -518,7 +493,7 @@ macro_rules! bind_platform_driver {
 
             let data_slice = unsafe { core::slice::from_raw_parts_mut(p_values, size as usize) };
             let index_bytes = index.to_be_bytes();
-            let address = platform.address as u8;
+            let address = (platform.address >> 1) as u8;
 
             match embedded_hal::i2c::I2c::write_read(&mut comms.bus, address, &index_bytes, data_slice) {
                 Ok(_) => {
@@ -550,7 +525,7 @@ macro_rules! bind_platform_driver {
 
             let data_slice = unsafe { core::slice::from_raw_parts(p_values, size as usize) };
             let index_bytes = index.to_be_bytes();
-            let address = platform.address as u8;
+            let address = (platform.address >> 1) as u8;
 
             #[cfg(feature = "defmt")]
             {
