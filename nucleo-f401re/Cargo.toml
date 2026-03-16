@@ -22,6 +22,9 @@ default = ["dep:panic-probe"]
 defmt = ["vl53l8cx-driver/defmt"]
 defmt-bus-trace = ["defmt"]
 spi-bus = ["dep:embedded-hal-bus", "dep:panic-probe"]
+xtalk = ["vl53l8cx-driver/xtalk"]
+motion = ["vl53l8cx-driver/motion"]
+thresholds = ["vl53l8cx-driver/thresholds"]
 
 [lib]
 test = false
