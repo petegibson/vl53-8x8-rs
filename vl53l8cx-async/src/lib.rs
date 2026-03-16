@@ -174,12 +174,7 @@ where
         Ok(())
     }
 
-    pub async fn set_address(&mut self, new_address: u8) -> Result<(), Error<BUS::Error>> {
-        self.set_reset_state(true)?;
-        self.delay.delay_ms(2).await;
-        self.set_reset_state(false)?;
-        self.delay.delay_ms(2).await;
-
+    pub async fn set_i2c_address(&mut self, new_address: u8) -> Result<(), Error<BUS::Error>> {
         ops::set_i2c_address(&mut self.bus, self.address, new_address).await?;
         self.address = new_address;
         Ok(())
