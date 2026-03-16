@@ -368,7 +368,7 @@ mod tests {
             .motion_indicator_init(&mut motion_config, Resolution::Res4x4)
             .unwrap();
         sensor
-            .motion_indicator_set_distance_motion(&mut motion_config, 200, 1500)
+            .motion_indicator_set_distance_motion(&mut motion_config, 400, 1500)
             .unwrap();
     }
 
