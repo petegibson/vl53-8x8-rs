@@ -40,6 +40,7 @@ fn main() {
     if env::var("CARGO_FEATURE_MOTION").is_ok() || env::var("CARGO_FEATURE_THRESHOLDS").is_ok() {
         println!("cargo:rustc-cfg=motion_or_thresholds");
         c_sources.push(driver_dir.join("src").join("vl53l8cx_plugin_motion_indicator.c"));
+        c_sources.push(driver_dir.join("src").join("vl53l8cx_plugin_detection_thresholds.c"));
         cc_build.define("VL53L8CX_USE_MOTION_INDICATOR", "1");
         bindgen_builder = bindgen_builder.clang_arg("-DVL53L8CX_USE_MOTION_INDICATOR=1");
     }

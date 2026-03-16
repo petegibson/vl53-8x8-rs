@@ -1,8 +1,5 @@
 use crate::{VL53L8CX_Configuration, VL53L8CX_ResultsData};
 
-#[cfg(feature = "thresholds")]
-use crate::VL53L8CX_DetectionThresholds;
-
 #[cfg(any(feature = "motion", feature = "thresholds"))]
 use crate::VL53L8CX_Motion_Configuration;
 

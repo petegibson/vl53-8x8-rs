@@ -79,8 +79,8 @@ pub mod thresholds {
 
     // Operations
     pub const VL53L8CX_OPERATION_NONE: u8 = 0;
-    pub const VL53L8CX_OPERATION_OR: u8 = 0; // Same as NONE in C source (idx 0) but logically OR for first element
-    pub const VL53L8CX_OPERATION_AND: u8 = 1;
+    pub const VL53L8CX_OPERATION_OR: u8 = 0;
+    pub const VL53L8CX_OPERATION_AND: u8 = 2;
 }
 
 // Re-export threshold constants to top level if feature is enabled
@@ -158,9 +158,11 @@ pub enum ThresholdType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ThresholdOperation {
-    Or = VL53L8CX_OPERATION_OR,
-    And = VL53L8CX_OPERATION_AND,
     None = VL53L8CX_OPERATION_NONE,
+    // Or: ULD defines VL53L8CX_OPERATION_OR as 0, same as NONE.
+    // Awaiting clarification from ST on whether OR should be a distinct value.
+    // Or = VL53L8CX_OPERATION_OR,
+    And = VL53L8CX_OPERATION_AND,
 }
 
 #[cfg(feature = "thresholds")]
