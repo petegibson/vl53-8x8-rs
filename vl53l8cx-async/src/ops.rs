@@ -1102,7 +1102,8 @@ pub async fn set_i2c_address<BUS: VlBusAsync>(
     new_addr: u8,
 ) -> Result<(), Error<BUS::Error>> {
     bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
-    bus.write_byte(addr, 0x04, new_addr >> 1).await.map_err(Error::Bus)?;
+    // Register 0x04 takes the 7-bit address directly.
+    bus.write_byte(addr, 0x04, new_addr).await.map_err(Error::Bus)?;
     bus.write_byte(new_addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
     Ok(())
 }
