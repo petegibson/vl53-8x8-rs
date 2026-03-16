@@ -33,6 +33,9 @@ name = "sensor_async"
 path = "tests/sensor_async.rs"
 harness = false
 
+[profile.dev]
+opt-level = "s"
+
 [profile.release]
 debug = 2
 lto = true
