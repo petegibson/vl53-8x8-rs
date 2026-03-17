@@ -13,6 +13,7 @@ pub mod ops;
 
 use bus::VlBusAsync;
 use embedded_hal::digital::{InputPin, OutputPin};
+pub use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
 use vl53l8cx_sys as sys;
@@ -32,7 +33,7 @@ pub use bus::{BlockingI2c, Vl53l8cxSpiDevice};
 pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     bus: BUS,
     delay: D,
-    address: u8,
+    address: SevenBitAddress,
     reset_pin: RST,
     int_pin: INT,
     lp_is_reset_high: bool,
@@ -174,7 +175,7 @@ where
         Ok(())
     }
 
-    pub async fn set_i2c_address(&mut self, new_address: u8) -> Result<(), Error<BUS::Error>> {
+    pub async fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<BUS::Error>> {
         ops::set_i2c_address(&mut self.bus, self.address, new_address).await?;
         self.address = new_address;
         Ok(())
@@ -242,7 +243,7 @@ where
     D: DelayNs,
 {
     pub async fn init(&mut self) -> Result<(), Error<BUS::Error>> {
-        self.stdev.platform.address = self.address as u16;
+        self.stdev.platform.address = (self.address as u16) << 1;
 
         if !ops::is_alive(&mut self.bus, self.address).await? {
             return Err(Error::NotAlive);

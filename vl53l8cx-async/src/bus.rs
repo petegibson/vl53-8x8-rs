@@ -1,3 +1,4 @@
+use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::i2c::I2c;
 use embedded_hal_async::spi::SpiDevice;
 
@@ -13,12 +14,12 @@ fn trace_data(data: &[u8]) {
 pub trait VlBusAsync {
     type Error: core::fmt::Debug;
 
-    async fn write(&mut self, addr: u8, reg: u16, data: &[u8]) -> Result<(), Self::Error>;
-    async fn read(&mut self, addr: u8, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error>;
-    async fn write_byte(&mut self, addr: u8, reg: u16, value: u8) -> Result<(), Self::Error> {
+    async fn write(&mut self, addr: SevenBitAddress, reg: u16, data: &[u8]) -> Result<(), Self::Error>;
+    async fn read(&mut self, addr: SevenBitAddress, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error>;
+    async fn write_byte(&mut self, addr: SevenBitAddress, reg: u16, value: u8) -> Result<(), Self::Error> {
         self.write(addr, reg, &[value]).await
     }
-    async fn read_byte(&mut self, addr: u8, reg: u16) -> Result<u8, Self::Error> {
+    async fn read_byte(&mut self, addr: SevenBitAddress, reg: u16) -> Result<u8, Self::Error> {
         let mut buf = [0u8; 1];
         self.read(addr, reg, &mut buf).await?;
         Ok(buf[0])
@@ -28,7 +29,7 @@ pub trait VlBusAsync {
 impl<T: I2c> VlBusAsync for T {
     type Error = <T as embedded_hal::i2c::ErrorType>::Error;
 
-    async fn write(&mut self, addr: u8, reg: u16, data: &[u8]) -> Result<(), Self::Error> {
+    async fn write(&mut self, addr: SevenBitAddress, reg: u16, data: &[u8]) -> Result<(), Self::Error> {
         #[cfg(feature = "defmt")]
         {
             defmt::trace!("i2c W [{:#04x}] reg={:#06x} len={}", addr, reg, data.len());
@@ -58,7 +59,7 @@ impl<T: I2c> VlBusAsync for T {
         result
     }
 
-    async fn read(&mut self, addr: u8, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
+    async fn read(&mut self, addr: SevenBitAddress, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
         let reg_bytes = reg.to_be_bytes();
         let result = I2c::write_read(self, addr, &reg_bytes, buf).await;
         #[cfg(feature = "defmt")]
@@ -89,7 +90,7 @@ pub struct BlockingI2c<T>(pub T);
 impl<T: embedded_hal::i2c::I2c> VlBusAsync for BlockingI2c<T> {
     type Error = <T as embedded_hal::i2c::ErrorType>::Error;
 
-    async fn write(&mut self, addr: u8, reg: u16, data: &[u8]) -> Result<(), Self::Error> {
+    async fn write(&mut self, addr: SevenBitAddress, reg: u16, data: &[u8]) -> Result<(), Self::Error> {
         #[cfg(feature = "defmt")]
         {
             defmt::trace!("i2c W [{:#04x}] reg={:#06x} len={}", addr, reg, data.len());
@@ -115,7 +116,7 @@ impl<T: embedded_hal::i2c::I2c> VlBusAsync for BlockingI2c<T> {
         result
     }
 
-    async fn read(&mut self, addr: u8, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
+    async fn read(&mut self, addr: SevenBitAddress, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
         let reg_bytes = reg.to_be_bytes();
         let result = embedded_hal::i2c::I2c::write_read(&mut self.0, addr, &reg_bytes, buf);
         #[cfg(feature = "defmt")]
@@ -137,7 +138,7 @@ pub struct Vl53l8cxSpiDevice<SPI> {
 impl<SPI: SpiDevice> VlBusAsync for Vl53l8cxSpiDevice<SPI> {
     type Error = <SPI as embedded_hal::spi::ErrorType>::Error;
 
-    async fn write(&mut self, _addr: u8, reg: u16, data: &[u8]) -> Result<(), Self::Error> {
+    async fn write(&mut self, _addr: SevenBitAddress, reg: u16, data: &[u8]) -> Result<(), Self::Error> {
         #[cfg(feature = "defmt")]
         {
             defmt::trace!("spi W reg={:#06x} len={}", reg, data.len());
@@ -152,7 +153,7 @@ impl<SPI: SpiDevice> VlBusAsync for Vl53l8cxSpiDevice<SPI> {
             .await
     }
 
-    async fn read(&mut self, _addr: u8, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
+    async fn read(&mut self, _addr: SevenBitAddress, reg: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
         let addr_bytes = (reg & 0x7FFF).to_be_bytes();
         let result = self.spi
             .transaction(&mut [

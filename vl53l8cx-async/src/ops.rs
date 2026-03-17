@@ -1,4 +1,5 @@
 use crate::bus::VlBusAsync;
+use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
 use vl53l8cx_sys::*;
 
@@ -13,7 +14,7 @@ pub fn swap_buffer(buf: &mut [u8], len: usize) {
 /// Poll the sensor for an expected answer. 2s timeout, 10ms intervals.
 pub async fn poll_for_answer<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     temp_buf: &mut [u8],
     size: u8,
@@ -64,7 +65,7 @@ pub async fn poll_for_answer<BUS: VlBusAsync, D: DelayNs>(
 /// Poll for MCU boot. 500ms timeout, 1ms intervals.
 pub async fn poll_for_mcu_boot<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
 ) -> Result<(), Error<BUS::Error>> {
     for _ in 0..500u16 {
@@ -89,7 +90,7 @@ pub async fn poll_for_mcu_boot<BUS: VlBusAsync, D: DelayNs>(
 /// DCI read: send command → poll → read → swap → copy data out.
 pub async fn dci_read<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     temp_buf: &mut [u8],
     data: &mut [u8],
@@ -139,7 +140,7 @@ pub async fn dci_read<BUS: VlBusAsync, D: DelayNs>(
 /// DCI write: build packet (header + data + footer) → swap → write → poll.
 pub async fn dci_write<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     temp_buf: &mut [u8],
     data: &mut [u8],
@@ -194,7 +195,7 @@ pub async fn dci_write<BUS: VlBusAsync, D: DelayNs>(
 /// DCI replace: read → modify → write.
 pub async fn dci_replace<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     temp_buf: &mut [u8],
     data: &mut [u8],
@@ -213,7 +214,7 @@ pub async fn dci_replace<BUS: VlBusAsync, D: DelayNs>(
 /// Send offset data gathered from NVM.
 pub async fn send_offset_data<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     temp_buf: &mut [u8],
     offset_data: &[u8],
@@ -305,7 +306,7 @@ pub async fn send_offset_data<BUS: VlBusAsync, D: DelayNs>(
 /// Send xtalk data from default configuration or user calibration.
 pub async fn send_xtalk_data<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     temp_buf: &mut [u8],
     xtalk_data: &[u8],
@@ -377,7 +378,7 @@ pub async fn send_xtalk_data<BUS: VlBusAsync, D: DelayNs>(
 /// Full sensor initialization sequence (translates vl53l8cx_init).
 pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     stdev: &mut VL53L8CX_Configuration,
 ) -> Result<(), Error<BUS::Error>> {
@@ -622,7 +623,7 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
 /// Check if sensor is alive by reading device and revision IDs.
 pub async fn is_alive<BUS: VlBusAsync>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
 ) -> Result<bool, Error<BUS::Error>> {
     bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
     let device_id = bus.read_byte(addr, 0x00).await.map_err(Error::Bus)?;
@@ -634,7 +635,7 @@ pub async fn is_alive<BUS: VlBusAsync>(
 /// Check if new ranging data is available.
 pub async fn check_data_ready<BUS: VlBusAsync>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     stdev: &mut VL53L8CX_Configuration,
 ) -> Result<bool, Error<BUS::Error>> {
     bus.read(addr, 0x0000, &mut stdev.temp_buffer[..4])
@@ -660,7 +661,7 @@ pub async fn check_data_ready<BUS: VlBusAsync>(
 /// Read ranging data from the sensor.
 pub async fn get_ranging_data<BUS: VlBusAsync>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     stdev: &mut VL53L8CX_Configuration,
 ) -> Result<VL53L8CX_ResultsData, Error<BUS::Error>> {
     let read_size = stdev.data_read_size as usize;
@@ -839,7 +840,7 @@ pub async fn get_ranging_data<BUS: VlBusAsync>(
 /// Start ranging session.
 pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     stdev: &mut VL53L8CX_Configuration,
 ) -> Result<(), Error<BUS::Error>> {
@@ -1042,7 +1043,7 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
 /// Stop ranging session.
 pub async fn stop_ranging<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
-    addr: u8,
+    addr: SevenBitAddress,
     delay: &mut D,
     stdev: &mut VL53L8CX_Configuration,
 ) -> Result<(), Error<BUS::Error>> {
@@ -1098,8 +1099,8 @@ pub async fn stop_ranging<BUS: VlBusAsync, D: DelayNs>(
 /// Set I2C address.
 pub async fn set_i2c_address<BUS: VlBusAsync>(
     bus: &mut BUS,
-    addr: u8,
-    new_addr: u8,
+    addr: SevenBitAddress,
+    new_addr: SevenBitAddress,
 ) -> Result<(), Error<BUS::Error>> {
     bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
     // Register 0x04 takes the 7-bit address directly.
