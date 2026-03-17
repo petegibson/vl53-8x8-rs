@@ -22,8 +22,10 @@ embassy_stm32::bind_interrupts!(struct Irqs {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    #[cfg(not(feature = "spi-bus"))]
+    #[cfg(all(not(feature = "spi-bus"), feature = "blocking-i2c"))]
     defmt::info!("VL53L8CX async driver starting (I2C bus, BlockingI2c wrapper)");
+    #[cfg(all(not(feature = "spi-bus"), not(feature = "blocking-i2c")))]
+    defmt::info!("VL53L8CX async driver starting (I2C bus, async)");
     #[cfg(feature = "spi-bus")]
     defmt::info!("VL53L8CX async driver starting (SPI bus)");
 
@@ -58,8 +60,8 @@ async fn main(_spawner: Spawner) {
     pwr_en_c.set_high();
     cortex_m::asm::delay(84_000 * 50);
 
-    // --- I2C mode (default) ---
-    #[cfg(not(feature = "spi-bus"))]
+    // --- I2C mode with BlockingI2c wrapper (for I2C v1 issues on F401) ---
+    #[cfg(all(not(feature = "spi-bus"), feature = "blocking-i2c"))]
     let mut sensor = {
         let mut i2c_config = embassy_stm32::i2c::Config::default();
         i2c_config.frequency = embassy_stm32::time::Hertz(400_000);
@@ -74,6 +76,25 @@ async fn main(_spawner: Spawner) {
         );
 
         Vl53l8cx::new(vl53l8cx_async::BlockingI2c(i2c), Delay)
+            .with_reset_pin_active_low(lp_c)
+    };
+
+    // --- I2C mode with async DMA ---
+    #[cfg(all(not(feature = "spi-bus"), not(feature = "blocking-i2c")))]
+    let mut sensor = {
+        let mut i2c_config = embassy_stm32::i2c::Config::default();
+        i2c_config.frequency = embassy_stm32::time::Hertz(400_000);
+        let i2c = embassy_stm32::i2c::I2c::new(
+            p.I2C1,
+            p.PB8,
+            p.PB9,
+            Irqs,
+            p.DMA1_CH6,
+            p.DMA1_CH0,
+            i2c_config,
+        );
+
+        Vl53l8cx::new(i2c, Delay)
             .with_reset_pin_active_low(lp_c)
     };
 

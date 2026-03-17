@@ -13,15 +13,25 @@ use vl53l8cx_async::{PowerMode, RangingMode, Resolution, TargetOrder, Vl53l8cx};
 mod bus_setup {
     use super::*;
     use embassy_stm32::i2c;
-    use vl53l8cx_async::BlockingI2c;
 
     embassy_stm32::bind_interrupts!(struct Irqs {
         I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
     });
 
+    type I2cInst = i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>;
+
+    #[cfg(feature = "blocking-i2c")]
     pub type Sensor = Vl53l8cx<
-        BlockingI2c<i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>>,
+        vl53l8cx_async::BlockingI2c<I2cInst>,
+        Delay,
+        Output<'static>,
+        embassy_stm32::gpio::Input<'static>,
+    >;
+
+    #[cfg(not(feature = "blocking-i2c"))]
+    pub type Sensor = Vl53l8cx<
+        I2cInst,
         Delay,
         Output<'static>,
         embassy_stm32::gpio::Input<'static>,
@@ -64,7 +74,12 @@ mod bus_setup {
         lp_c.set_high();
         cortex_m::asm::delay(84_000 * 100);
 
-        Vl53l8cx::new(BlockingI2c(i2c), Delay)
+        #[cfg(feature = "blocking-i2c")]
+        let sensor = Vl53l8cx::new(vl53l8cx_async::BlockingI2c(i2c), Delay);
+        #[cfg(not(feature = "blocking-i2c"))]
+        let sensor = Vl53l8cx::new(i2c, Delay);
+
+        sensor
             .with_reset_pin_active_low(lp_c)
             .with_interrupt_pin_active_low(int_c)
     }

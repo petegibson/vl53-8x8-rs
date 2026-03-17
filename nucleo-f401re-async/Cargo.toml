@@ -18,6 +18,7 @@ vl53l8cx-async = { path = "../vl53l8cx-async" }
 
 [features]
 default = []
+blocking-i2c = []
 spi-bus = ["dep:embedded-hal-bus"]
 defmt-bus-trace = ["vl53l8cx-async/defmt"]
 
