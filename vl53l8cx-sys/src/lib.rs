@@ -96,6 +96,21 @@ pub const DEFAULT_ADDRESS: u8 = 0x29;
 /// The required buffer size for crosstalk calibration data (776 bytes).
 pub const XTALK_BUFFER_SIZE: usize = 776;
 
+/// Command to retrieve xtalk calibration data from the sensor.
+/// Mirrors the C `static const uint8_t VL53L8CX_GET_XTALK_CMD[72]`.
+#[cfg(feature = "xtalk")]
+pub const VL53L8CX_GET_XTALK_CMD: [u8; 72] = [
+    0x54, 0x00, 0x00, 0x40, 0x9F, 0xD8, 0x00, 0xC0,
+    0x9F, 0xE4, 0x01, 0x40, 0x9F, 0xF8, 0x00, 0x40,
+    0x9F, 0xFC, 0x04, 0x04, 0xA0, 0xFC, 0x01, 0x00,
+    0xA1, 0x0C, 0x01, 0x00, 0xA1, 0x1C, 0x00, 0xC0,
+    0xA1, 0x28, 0x09, 0x02, 0xA2, 0x48, 0x00, 0x40,
+    0xA2, 0x4C, 0x00, 0x81, 0xA2, 0x54, 0x00, 0x81,
+    0xA2, 0x5C, 0x00, 0x81, 0xA2, 0x64, 0x00, 0x81,
+    0xA2, 0x6C, 0x00, 0x84, 0xA2, 0x8C, 0x00, 0x82,
+    0x00, 0x00, 0x00, 0x0F, 0x07, 0x02, 0x00, 0x44,
+];
+
 /// A placeholder type for an unconfigured hardware pin.
 pub struct NoPin;
 
@@ -176,6 +191,34 @@ pub struct DetectionThreshold {
     pub zone_num: u8,
     pub mathematic_operation: ThresholdOperation,
 }
+
+/// Pure Rust representation of the motion indicator configuration.
+/// Layout matches the C struct `VL53L8CX_Motion_Configuration`.
+#[cfg(any(feature = "motion", feature = "thresholds"))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct MotionConfiguration {
+    pub ref_bin_offset: i32,
+    pub detection_threshold: u32,
+    pub extra_noise_sigma: u32,
+    pub null_den_clip_value: u32,
+    pub mem_update_mode: u8,
+    pub mem_update_choice: u8,
+    pub sum_span: u8,
+    pub feature_length: u8,
+    pub nb_of_aggregates: u8,
+    pub nb_of_temporal_accumulations: u8,
+    pub min_nb_for_global_detection: u8,
+    pub global_indicator_format_1: u8,
+    pub global_indicator_format_2: u8,
+    pub spare_1: u8,
+    pub spare_2: u8,
+    pub spare_3: u8,
+    pub map_id: [i8; 64],
+    pub indicator_format_1: [u8; 32],
+    pub indicator_format_2: [u8; 32],
+}
+
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FirmwareError {
@@ -258,17 +301,23 @@ pub const VL53L8CX_CONFIGURATION_SIZE: u16 = 972;
 pub const VL53L8CX_FW_CHECKSUM: u32 = 0x0C0B6C9E;
 
 // --- DCI Register Addresses ---
+pub const VL53L8CX_DCI_CAL_CFG: u16 = 0x5470;
 pub const VL53L8CX_DCI_ZONE_CONFIG: u16 = 0x5450;
 pub const VL53L8CX_DCI_FREQ_HZ: u16 = 0x5458;
 pub const VL53L8CX_DCI_INT_TIME: u16 = 0x545C;
 pub const VL53L8CX_DCI_FW_NB_TARGET: u16 = 0x5478;
+pub const VL53L8CX_DCI_DET_THRESH_CONFIG: u16 = 0x5488;
 pub const VL53L8CX_DCI_RANGING_MODE: u16 = 0xAD30;
 pub const VL53L8CX_DCI_DSS_CONFIG: u16 = 0xAD38;
 pub const VL53L8CX_DCI_VHV_CONFIG: u16 = 0xAD60;
+pub const VL53L8CX_DCI_XTALK_CFG: u16 = 0xAD94;
 pub const VL53L8CX_DCI_TARGET_ORDER: u16 = 0xAE64;
 pub const VL53L8CX_DCI_SHARPENER: u16 = 0xAED8;
 pub const VL53L8CX_DCI_INTERNAL_CP: u16 = 0xB39C;
 pub const VL53L8CX_DCI_SYNC_PIN: u16 = 0xB5F0;
+pub const VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG: u16 = 0xB6E0;
+pub const VL53L8CX_DCI_DET_THRESH_START: u16 = 0xB6E8;
+pub const VL53L8CX_DCI_DET_THRESH_VALID_STATUS: u16 = 0xB9F0;
 pub const VL53L8CX_DCI_MOTION_DETECTOR_CFG: u16 = 0xBFAC;
 pub const VL53L8CX_DCI_SINGLE_RANGE: u16 = 0xD964;
 pub const VL53L8CX_DCI_OUTPUT_CONFIG: u16 = 0xD968;

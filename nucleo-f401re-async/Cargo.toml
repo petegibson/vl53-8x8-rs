@@ -21,6 +21,9 @@ default = []
 blocking-i2c = []
 spi-bus = ["dep:embedded-hal-bus"]
 defmt-bus-trace = ["vl53l8cx-async/defmt"]
+xtalk = ["vl53l8cx-async/xtalk"]
+motion = ["vl53l8cx-async/motion"]
+thresholds = ["vl53l8cx-async/thresholds"]
 
 [[bin]]
 name = "nucleo-f401re-async"
@@ -32,6 +35,11 @@ embedded-test = { version = "0.7", features = ["defmt", "embassy"] }
 [[test]]
 name = "sensor_async"
 path = "tests/sensor_async.rs"
+harness = false
+
+[[test]]
+name = "sensor_async_extra"
+path = "tests/sensor_async_extra.rs"
 harness = false
 
 [profile.dev]

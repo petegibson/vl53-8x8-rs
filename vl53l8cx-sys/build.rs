@@ -192,6 +192,8 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
         .allowlist_type("VL53L8CX_.*")
         .allowlist_var("VL53L8CX_.*")
         .allowlist_var("VL53L8CX_XTALK_BUFFER_SIZE") // Ensure this const is always generated
+        .blocklist_item("VL53L8CX_GET_XTALK_CMD") // static const in C header; defined as Rust const in lib.rs
+        .blocklist_item("VL53L8CX_CALIBRATE_XTALK") // static const in C header; not needed from Rust
         .generate()
         .expect("Unable to generate bindings");
 

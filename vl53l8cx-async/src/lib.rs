@@ -26,7 +26,18 @@ pub use sys::{
 };
 
 #[cfg(feature = "thresholds")]
-pub use sys::{DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType};
+pub use sys::{
+    DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType,
+    VL53L8CX_NB_THRESHOLDS,
+};
+
+/// Number of detection thresholds as usize for array sizing.
+#[cfg(feature = "thresholds")]
+const NB_THRESHOLDS: usize = VL53L8CX_NB_THRESHOLDS as usize;
+
+#[cfg(any(feature = "motion", feature = "thresholds"))]
+pub use sys::MotionConfiguration;
+
 
 pub use bus::{BlockingI2c, Vl53l8cxSpiDevice};
 
@@ -646,5 +657,309 @@ where
             sys::VL53L8CX_DCI_SYNC_PIN as u32, 4,
         ).await?;
         Ok((buf[3] & 0x02) != 0)
+    }
+}
+
+// --- Detection thresholds (requires "thresholds" feature) ---
+
+#[cfg(feature = "thresholds")]
+impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+where
+    BUS: VlBusAsync,
+    D: DelayNs,
+{
+    pub async fn get_detection_thresholds_enable(&mut self) -> Result<bool, Error<BUS::Error>> {
+        let mut buf = [0u8; 8];
+        ops::dci_read(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut buf,
+            sys::VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG as u32, 8,
+        ).await?;
+        Ok(buf[0x01] != 0)
+    }
+
+    pub async fn set_detection_thresholds_enable(&mut self, enabled: bool) -> Result<(), Error<BUS::Error>> {
+        let grp_global_config: [u8; 4] = if enabled {
+            [0x01, 0x01, 0x01, 0x00]
+        } else {
+            [0x01, 0x00, 0x01, 0x00]
+        };
+        let tmp: u8 = if enabled { 0x04 } else { 0x0C };
+
+        let mut data = [0u8; 8];
+        ops::dci_replace(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut data,
+            sys::VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG as u32, 8,
+            &grp_global_config, 0x00,
+        ).await?;
+
+        let mut data2 = [0u8; 20];
+        ops::dci_replace(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut data2,
+            sys::VL53L8CX_DCI_DET_THRESH_CONFIG as u32, 20,
+            &[tmp], 0x11,
+        ).await
+    }
+
+    fn scale_thresholds_for_read(thresholds: &mut [DetectionThreshold]) {
+        for t in thresholds.iter_mut() {
+            let scale: i32 = match t.measurement {
+                ThresholdMeasurement::DistanceMm => 4,
+                ThresholdMeasurement::SignalPerSpadKcps
+                | ThresholdMeasurement::AmbientPerSpadKcps => 2048,
+                ThresholdMeasurement::RangeSigmaMm => 128,
+                ThresholdMeasurement::NbSpadsEnabled => 256,
+                ThresholdMeasurement::MotionIndicator => 65535,
+                _ => 1,
+            };
+            if scale != 1 {
+                t.low_threshold /= scale;
+                t.high_threshold /= scale;
+            }
+        }
+    }
+
+    fn scale_thresholds_for_write(thresholds: &mut [DetectionThreshold]) {
+        for t in thresholds.iter_mut() {
+            let scale: i32 = match t.measurement {
+                ThresholdMeasurement::DistanceMm => 4,
+                ThresholdMeasurement::SignalPerSpadKcps
+                | ThresholdMeasurement::AmbientPerSpadKcps => 2048,
+                ThresholdMeasurement::RangeSigmaMm => 128,
+                ThresholdMeasurement::NbSpadsEnabled => 256,
+                ThresholdMeasurement::MotionIndicator => 65535,
+                _ => 1,
+            };
+            if scale != 1 {
+                t.low_threshold *= scale;
+                t.high_threshold *= scale;
+            }
+        }
+    }
+
+    pub async fn get_detection_thresholds(
+        &mut self,
+    ) -> Result<[DetectionThreshold; NB_THRESHOLDS], Error<BUS::Error>> {
+        // Each DetectionThreshold is 12 bytes (repr(C)), total = 64 * 12 = 768
+        const THRESH_SIZE: u16 = (NB_THRESHOLDS * core::mem::size_of::<DetectionThreshold>()) as u16;
+        let mut buf = [0u8; THRESH_SIZE as usize];
+        ops::dci_read(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut buf,
+            sys::VL53L8CX_DCI_DET_THRESH_START as u32, THRESH_SIZE,
+        ).await?;
+
+        // Safety: DetectionThreshold is repr(C) with known size, and buf is properly aligned
+        // on the stack. We transmute the raw bytes into the threshold array.
+        let mut thresholds: [DetectionThreshold; NB_THRESHOLDS] =
+            unsafe { core::mem::transmute(buf) };
+        Self::scale_thresholds_for_read(&mut thresholds);
+        Ok(thresholds)
+    }
+
+    pub async fn set_detection_thresholds(
+        &mut self,
+        mut thresholds: [DetectionThreshold; NB_THRESHOLDS],
+    ) -> Result<(), Error<BUS::Error>> {
+        Self::scale_thresholds_for_write(&mut thresholds);
+
+        // Write valid target config
+        let mut grp_valid_target_cfg: [u8; 8] = [0x05; 8];
+        ops::dci_write(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut grp_valid_target_cfg,
+            sys::VL53L8CX_DCI_DET_THRESH_VALID_STATUS as u32, 8,
+        ).await?;
+
+        // Write thresholds
+        const THRESH_SIZE: u16 = (NB_THRESHOLDS * core::mem::size_of::<DetectionThreshold>()) as u16;
+        let mut buf: [u8; THRESH_SIZE as usize] = unsafe { core::mem::transmute(thresholds) };
+        ops::dci_write(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut buf,
+            sys::VL53L8CX_DCI_DET_THRESH_START as u32, THRESH_SIZE,
+        ).await
+    }
+}
+
+// --- Motion indicator (requires "motion" or "thresholds" feature) ---
+
+#[cfg(any(feature = "motion", feature = "thresholds"))]
+impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+where
+    BUS: VlBusAsync,
+    D: DelayNs,
+{
+    pub async fn motion_indicator_init(
+        &mut self,
+        motion_config: &mut MotionConfiguration,
+        resolution: Resolution,
+    ) -> Result<(), Error<BUS::Error>> {
+        // Zero and set defaults
+        *motion_config = unsafe { core::mem::zeroed() };
+        motion_config.ref_bin_offset = 13633;
+        motion_config.detection_threshold = 2883584;
+        motion_config.extra_noise_sigma = 0;
+        motion_config.null_den_clip_value = 0;
+        motion_config.mem_update_mode = 6;
+        motion_config.mem_update_choice = 2;
+        motion_config.sum_span = 4;
+        motion_config.feature_length = 9;
+        motion_config.nb_of_aggregates = 16;
+        motion_config.nb_of_temporal_accumulations = 16;
+        motion_config.min_nb_for_global_detection = 1;
+        motion_config.global_indicator_format_1 = 8;
+        motion_config.global_indicator_format_2 = 0;
+
+        self.motion_indicator_set_resolution(motion_config, resolution).await
+    }
+
+    pub async fn motion_indicator_set_distance_motion(
+        &mut self,
+        motion_config: &mut MotionConfiguration,
+        distance_min_mm: u16,
+        distance_max_mm: u16,
+    ) -> Result<(), Error<BUS::Error>> {
+        if (distance_max_mm - distance_min_mm) > 1500
+            || distance_min_mm < 400
+            || distance_max_mm > 4000
+        {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+
+        // ref_bin_offset = ((distance_min / 37.5348) - 4.0) * 2048.5
+        let min_f = distance_min_mm as f32;
+        let tmp = ((min_f / 37.5348) - 4.0) * 2048.5;
+        motion_config.ref_bin_offset = tmp as i32;
+
+        // feature_length = (((max - min) / 10.0 + 30.02784) / 15.01392) + 0.5
+        let range_f = (distance_max_mm - distance_min_mm) as f32;
+        let tmp = ((range_f / 10.0 + 30.02784) / 15.01392) + 0.5;
+        motion_config.feature_length = tmp as u8;
+
+        let config_size = core::mem::size_of::<MotionConfiguration>() as u16;
+        let mut buf: [u8; core::mem::size_of::<MotionConfiguration>()] =
+            unsafe { core::mem::transmute_copy(motion_config) };
+        ops::dci_write(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut buf,
+            sys::VL53L8CX_DCI_MOTION_DETECTOR_CFG as u32, config_size,
+        ).await
+    }
+
+    pub async fn motion_indicator_set_resolution(
+        &mut self,
+        motion_config: &mut MotionConfiguration,
+        resolution: Resolution,
+    ) -> Result<(), Error<BUS::Error>> {
+        match resolution {
+            Resolution::Res4x4 => {
+                for i in 0..16u8 {
+                    motion_config.map_id[i as usize] = i as i8;
+                }
+                for i in 16..64 {
+                    motion_config.map_id[i] = -1;
+                }
+            }
+            Resolution::Res8x8 => {
+                for i in 0..64u8 {
+                    motion_config.map_id[i as usize] =
+                        ((i % 8) / 2 + 4 * (i / 16)) as i8;
+                }
+            }
+        }
+
+        let config_size = core::mem::size_of::<MotionConfiguration>() as u16;
+        let mut buf: [u8; core::mem::size_of::<MotionConfiguration>()] =
+            unsafe { core::mem::transmute_copy(motion_config) };
+        ops::dci_write(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut buf,
+            sys::VL53L8CX_DCI_MOTION_DETECTOR_CFG as u32, config_size,
+        ).await
+    }
+}
+
+// --- Xtalk (requires "xtalk" feature) ---
+
+#[cfg(feature = "xtalk")]
+impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+where
+    BUS: VlBusAsync,
+    D: DelayNs,
+{
+    pub async fn get_xtalk_margin(&mut self) -> Result<u32, Error<BUS::Error>> {
+        let mut buf = [0u8; 16];
+        ops::dci_read(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut buf,
+            sys::VL53L8CX_DCI_XTALK_CFG as u32, 16,
+        ).await?;
+        let margin = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+        Ok(margin / 2048)
+    }
+
+    pub async fn set_xtalk_margin(&mut self, margin: u32) -> Result<(), Error<BUS::Error>> {
+        if margin > 10000 {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+        let margin_kcps = margin * 2048;
+        let mut data = [0u8; 16];
+        ops::dci_replace(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut data,
+            sys::VL53L8CX_DCI_XTALK_CFG as u32, 16,
+            &margin_kcps.to_le_bytes(), 0x00,
+        ).await
+    }
+
+    pub async fn get_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<BUS::Error>> {
+        if buffer.len() < XTALK_BUFFER_SIZE {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+
+        // Save and set 8x8 resolution
+        let resolution = self.get_resolution().await?;
+        self.set_resolution(Resolution::Res8x8).await?;
+
+        // Send GET_XTALK_CMD to 0x2fb8
+        self.bus.write(self.address, 0x2fb8, &sys::VL53L8CX_GET_XTALK_CMD)
+            .await.map_err(Error::Bus)?;
+        ops::poll_for_answer(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, 4, 1,
+            sys::VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+        ).await?;
+
+        // Read xtalk data (XTALK_BUFFER_SIZE + 4 bytes)
+        let read_size = XTALK_BUFFER_SIZE + 4;
+        self.bus.read(
+            self.address, sys::VL53L8CX_UI_CMD_START,
+            &mut self.stdev.temp_buffer[..read_size],
+        ).await.map_err(Error::Bus)?;
+
+        // Copy data: skip first 8 bytes of response, take XTALK_BUFFER_SIZE - 8 bytes
+        buffer[..XTALK_BUFFER_SIZE - 8]
+            .copy_from_slice(&self.stdev.temp_buffer[8..XTALK_BUFFER_SIZE]);
+        // Append footer
+        let footer: [u8; 8] = [0x00, 0x00, 0x00, 0x0F, 0x00, 0x01, 0x03, 0x04];
+        buffer[XTALK_BUFFER_SIZE - 8..XTALK_BUFFER_SIZE].copy_from_slice(&footer);
+
+        // Restore resolution
+        self.set_resolution(resolution).await
+    }
+
+    pub async fn set_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<BUS::Error>> {
+        if buffer.len() < XTALK_BUFFER_SIZE {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+
+        // Save resolution, copy xtalk data, re-apply resolution to trigger send_xtalk_data
+        let resolution = self.get_resolution().await?;
+        self.stdev.xtalk_data[..XTALK_BUFFER_SIZE]
+            .copy_from_slice(&buffer[..XTALK_BUFFER_SIZE]);
+        self.set_resolution(resolution).await
     }
 }
