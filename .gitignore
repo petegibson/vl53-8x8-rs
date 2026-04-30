@@ -46,3 +46,4 @@ nucleo-f401re-async/target
 /nucleo-f401re-async/async_spi_log.txt
 /.direnv
 /.envrc
+/rpi-zero-2w/target

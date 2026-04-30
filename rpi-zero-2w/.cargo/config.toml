@@ -1,0 +1,8 @@
+# Default cargo target for this crate. Pi Zero 2W ships with 64-bit
+# Raspberry Pi OS (Bookworm) by default, so aarch64 is the right choice.
+# Override with `--target armv7-unknown-linux-gnueabihf` for 32-bit OS.
+#
+# The linker is supplied by the dev shell via
+# CARGO_TARGET_*_LINKER env vars (see flake.nix).
+[build]
+target = "aarch64-unknown-linux-gnu"

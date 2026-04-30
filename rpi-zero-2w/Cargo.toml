@@ -1,0 +1,18 @@
+[package]
+name = "rpi-zero-2w"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Raspberry Pi Zero 2W VL53L8CX example driving a Pololu breakout via SPI0."
+publish = false
+
+[dependencies]
+vl53l8cx-driver = { path = "../vl53l8cx-driver", features = ["std"] }
+vl53l8cx-async = { path = "../vl53l8cx-async", features = ["std"] }
+linux-embedded-hal = "0.4"
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+anyhow = "1"
+env_logger = "0.11"
+log = "0.4"

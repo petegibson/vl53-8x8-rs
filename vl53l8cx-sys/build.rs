@@ -100,27 +100,47 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
 
     // --- Configuration for Cross-Compilation ---
     let target = env::var("TARGET").unwrap();
-    if target.starts_with("armv7-unknown-linux-") {
-        // When cross-compiling, both `cc` and `bindgen` need to know where the
-        // target's C standard library headers are. We can ask the C compiler for its sysroot.
+    let host = env::var("HOST").unwrap_or_default();
+    let is_native_linux = target == host;
+    let is_linux_cross = (target.starts_with("armv7-unknown-linux-")
+        || target.starts_with("aarch64-unknown-linux-"))
+        && target != host;
+
+    if is_native_linux || is_linux_cross {
+        // Native or Linux cross-compile. Bindgen uses libclang, which in
+        // hermetic environments (nix, Docker) and most cross-toolchains
+        // can't find libc headers on its own. Probe the (cross) C
+        // compiler for the include paths it would actually search and
+        // forward them to libclang via `-isystem`. For cross-compile we
+        // also pass `--target` so clang parses headers for the right
+        // architecture (sizes, alignments, predefined macros).
         let compiler = cc_build.get_compiler();
-        let output = std::process::Command::new(compiler.path())
-            .arg("-print-sysroot")
-            .output()
-            .expect("Failed to execute C compiler to get sysroot");
-
-        if !output.status.success() {
-            panic!(
-                "C compiler failed to report sysroot. stderr: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+        if is_linux_cross {
+            bindgen_builder = bindgen_builder.clang_arg(format!("--target={}", target));
         }
-
-        let sysroot = String::from_utf8(output.stdout).unwrap().trim().to_string();
-
-        bindgen_builder = bindgen_builder
-            .clang_arg(format!("--sysroot={}", sysroot))
-            .clang_arg(format!("--target={}", target));
+        if let Ok(output) = std::process::Command::new(compiler.path())
+            .args(["-E", "-x", "c", "-v", "-"])
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let mut in_search = false;
+            for line in stderr.lines() {
+                if line.contains("#include <...> search starts here:") {
+                    in_search = true;
+                    continue;
+                }
+                if line.contains("End of search list.") {
+                    break;
+                }
+                if in_search {
+                    let path = line.trim();
+                    if !path.is_empty() {
+                        bindgen_builder = bindgen_builder.clang_arg(format!("-isystem{}", path));
+                    }
+                }
+            }
+        }
     } else if target.starts_with("thumbv") {
         // Bare-metal ARM cross-compilation (e.g. thumbv7em-none-eabihf).
         // The CC_<target> and AR_<target> env vars tell the `cc` crate which
