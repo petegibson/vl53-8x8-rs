@@ -3,7 +3,7 @@ name = "vl53l8cx-sys"
 version = "0.1.0"
 edition = "2021"
 description = "Low-level FFI bindings for the STMicroelectronics VL53L8CX Ultra Lite Driver (ULD)."
-license = "MIT OR Apache-2.0"
+license = "BSD-3-Clause"
 links = "vl53l8cx_uld"
 
 [dependencies]

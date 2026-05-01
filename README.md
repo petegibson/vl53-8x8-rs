@@ -219,23 +219,17 @@ it natively.
 
 ## License
 
-### Rust wrapper code
+This workspace is licensed under the **BSD 3-Clause License** — see
+[`LICENSE`](LICENSE).
 
-Dual-licensed under your choice of:
-* **MIT License** ([LICENSE-MIT](LICENSE-MIT) or
-  <http://opensource.org/licenses/MIT>)
-* **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or
-  <http://www.apache.org/licenses/LICENSE-2.0>)
+The C source under [`vl53l8cx-sys/src/VL53L8CX_ULD_API/`](./vl53l8cx-sys/src/VL53L8CX_ULD_API)
+is the official **STMicroelectronics VL53L8CX Ultra Lite Driver**,
+distributed by ST under the BSD 3-Clause License (see the per-file
+copyright headers and `LICENSE.txt` in ST's
+[STSW-IMG040](https://www.st.com/en/embedded-software/stsw-img040.html)
+package). It is included verbatim apart from line-ending normalisation
+and a single missing-semicolon fix in `vl53l8cx_api.c`.
 
-### STMicroelectronics driver code
-
-`vl53l8cx-sys` statically links and redistributes the
-**STMicroelectronics VL53L8CX Ultra Lite Driver**, which is included in
-the source tree.
-
-**The STMicroelectronics ULD software is subject to the proprietary
-STMicroelectronics license terms (SLA0044).**
-
-> Use of the underlying C driver is restricted to use with **STMicroelectronics
-> products** (specifically the VL53L8CX sensor). By using this crate you
-> agree to the terms in `LICENSE-ST` shipped with this repository.
+The Rust portions originate from Scott Wakefield's earlier
+`vl53l5cx-driver` / `vl53l8cx-driver` work and are included here under
+BSD 3-Clause with the original author's permission.

@@ -2,7 +2,7 @@
 name = "rpi-zero-2w"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "BSD-3-Clause"
 description = "Raspberry Pi Zero 2W VL53L8CX example driving a Pololu breakout via SPI0."
 publish = false
 
