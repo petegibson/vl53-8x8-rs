@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![allow(async_fn_in_trait)]
 /*!
 An async, platform-agnostic driver for the VL53L8CX Time-of-Flight sensor.
@@ -9,7 +9,9 @@ data blobs (firmware, configuration, xtalk tables).
 */
 
 pub mod bus;
+pub mod firmware;
 pub mod ops;
+pub mod sensor;
 
 use bus::VlBusAsync;
 use embedded_hal::digital::{InputPin, OutputPin};
@@ -40,6 +42,8 @@ pub use sys::MotionConfiguration;
 
 
 pub use bus::{BlockingI2c, Vl53l8cxSpiDevice};
+pub use firmware::{FirmwareSource, PatchedFirmware, SliceFirmware};
+pub use sensor::{detect, Variant};
 
 pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     bus: BUS,
@@ -50,6 +54,9 @@ pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     lp_is_reset_high: bool,
     int_is_data_ready_high: bool,
     stdev: VL53L8CX_Configuration,
+    /// Sensor variant. Defaults to [`Variant::L8`] and is set to the detected
+    /// part by [`Vl53l8cx::init`].
+    variant: Variant,
 }
 
 // --- Constructors ---
@@ -69,6 +76,7 @@ where
             lp_is_reset_high: false,
             int_is_data_ready_high: false,
             stdev: unsafe { core::mem::zeroed() },
+            variant: Variant::L8,
         }
     }
 }
@@ -88,6 +96,7 @@ where
             lp_is_reset_high: false,
             int_is_data_ready_high: false,
             stdev: unsafe { core::mem::zeroed() },
+            variant: Variant::L8,
         }
     }
 }
@@ -108,6 +117,7 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             lp_is_reset_high: false,
             int_is_data_ready_high: self.int_is_data_ready_high,
             stdev: self.stdev,
+            variant: self.variant,
         }
     }
 
@@ -124,6 +134,7 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             lp_is_reset_high: true,
             int_is_data_ready_high: self.int_is_data_ready_high,
             stdev: self.stdev,
+            variant: self.variant,
         }
     }
 
@@ -140,6 +151,7 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             lp_is_reset_high: self.lp_is_reset_high,
             int_is_data_ready_high: false,
             stdev: self.stdev,
+            variant: self.variant,
         }
     }
 
@@ -156,6 +168,7 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
             lp_is_reset_high: self.lp_is_reset_high,
             int_is_data_ready_high: true,
             stdev: self.stdev,
+            variant: self.variant,
         }
     }
 }
@@ -253,18 +266,40 @@ where
     BUS: VlBusAsync,
     D: DelayNs,
 {
+    /// Detect the connected sensor variant, then upload its (patched) firmware
+    /// and bring the sensor up. The detected variant is stored and available
+    /// via [`Vl53l8cx::variant`].
     pub async fn init(&mut self) -> Result<(), Error<BUS::Error>> {
         self.stdev.platform.address = (self.address as u16) << 1;
 
-        if !ops::is_alive(&mut self.bus, self.address).await? {
-            return Err(Error::NotAlive);
-        }
+        self.variant = sensor::detect(&mut self.bus, self.address).await?;
 
-        ops::init_sensor(&mut self.bus, self.address, &mut self.delay, &mut self.stdev).await
+        let mut fw = self.variant.firmware();
+        let info = self.variant.info();
+        ops::init_sensor(
+            &mut self.bus,
+            self.address,
+            &mut self.delay,
+            &mut self.stdev,
+            &mut fw,
+            info,
+        )
+        .await
     }
 
+    /// The sensor variant detected by [`Vl53l8cx::init`]. Before `init` this is
+    /// the default ([`Variant::L8`]), not a detected value.
+    pub fn variant(&self) -> Variant {
+        self.variant
+    }
+
+    /// Returns true if a recognised sensor (VL53L5CX or VL53L8CX) is present.
     pub async fn is_alive(&mut self) -> Result<bool, Error<BUS::Error>> {
-        ops::is_alive(&mut self.bus, self.address).await
+        match sensor::detect(&mut self.bus, self.address).await {
+            Ok(_) => Ok(true),
+            Err(Error::NotAlive) | Err(Error::UnknownRevision(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn start_ranging(&mut self) -> Result<(), Error<BUS::Error>> {
@@ -554,9 +589,12 @@ where
                     &mut self.stdev.temp_buffer, 1, 0, 0x06, 0x01, 1,
                 ).await?;
                 if stored == 0x43 {
-                    // Re-init after deep sleep
+                    // Re-init after deep sleep, using the detected variant.
+                    let mut fw = self.variant.firmware();
+                    let info = self.variant.info();
                     ops::init_sensor(
                         &mut self.bus, self.address, &mut self.delay, &mut self.stdev,
+                        &mut fw, info,
                     ).await?;
                 }
             }

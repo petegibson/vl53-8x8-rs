@@ -1,4 +1,6 @@
 use crate::bus::VlBusAsync;
+use crate::firmware::FirmwareSource;
+use crate::sensor::SensorInfo;
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
 use vl53l8cx_sys::*;
@@ -381,6 +383,8 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     addr: SevenBitAddress,
     delay: &mut D,
     stdev: &mut VL53L8CX_Configuration,
+    fw: &mut impl FirmwareSource,
+    info: &SensorInfo,
 ) -> Result<(), Error<BUS::Error>> {
     stdev.is_auto_stop_enabled = 0;
 
@@ -469,20 +473,23 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
     bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
 
-    // Download firmware into VL53L8CX (3 pages: 32KB + 32KB + 20KB)
-    let fw = unsafe { &VL53L8CX_FIRMWARE };
-    bus.write_byte(addr, 0x7FFF, 0x09).await.map_err(Error::Bus)?;
-    bus.write(addr, 0x0000, &fw[..0x8000])
-        .await
-        .map_err(Error::Bus)?;
-    bus.write_byte(addr, 0x7FFF, 0x0A).await.map_err(Error::Bus)?;
-    bus.write(addr, 0x0000, &fw[0x8000..0x10000])
-        .await
-        .map_err(Error::Bus)?;
-    bus.write_byte(addr, 0x7FFF, 0x0B).await.map_err(Error::Bus)?;
-    bus.write(addr, 0x0000, &fw[0x10000..0x15000])
-        .await
-        .map_err(Error::Bus)?;
+    // Download firmware into the sensor in 3 banks (32KB + 32KB + 20KB), each
+    // written to device address 0 of its own page. Bytes are pulled from the
+    // `fw` source in runs; an unpatched source yields a whole bank per call
+    // (one zero-copy write), a patched source splits only around its overlay.
+    const FW_BANKS: [(u8, usize, usize); 3] =
+        [(0x09, 0, 0x8000), (0x0A, 0x8000, 0x10000), (0x0B, 0x10000, 0x15000)];
+    for (page, start, bank_end) in FW_BANKS {
+        bus.write_byte(addr, 0x7FFF, page).await.map_err(Error::Bus)?;
+        let mut off = start;
+        while off < bank_end {
+            let chunk = fw.chunk(off, bank_end - off);
+            bus.write(addr, (off - start) as u16, chunk)
+                .await
+                .map_err(Error::Bus)?;
+            off += chunk.len();
+        }
+    }
     bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
 
     // Check if FW correctly downloaded
@@ -509,19 +516,21 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
 
     bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
 
-    // Firmware checksum
-    bus.read(addr, 0x2FFC, &mut stdev.temp_buffer[..4])
-        .await
-        .map_err(Error::Bus)?;
-    swap_buffer(&mut stdev.temp_buffer, 4);
-    let crc = u32::from_le_bytes([
-        stdev.temp_buffer[0],
-        stdev.temp_buffer[1],
-        stdev.temp_buffer[2],
-        stdev.temp_buffer[3],
-    ]);
-    if crc != VL53L8CX_FW_CHECKSUM {
-        return Err(Error::Firmware(FirmwareError::FwChecksumFail));
+    // Firmware checksum (only the parts that expose one, e.g. L8).
+    if let Some(expected) = info.fw_checksum {
+        bus.read(addr, 0x2FFC, &mut stdev.temp_buffer[..4])
+            .await
+            .map_err(Error::Bus)?;
+        swap_buffer(&mut stdev.temp_buffer, 4);
+        let crc = u32::from_le_bytes([
+            stdev.temp_buffer[0],
+            stdev.temp_buffer[1],
+            stdev.temp_buffer[2],
+            stdev.temp_buffer[3],
+        ]);
+        if crc != expected {
+            return Err(Error::Firmware(FirmwareError::FwChecksumFail));
+        }
     }
 
     // Get offset NVM data

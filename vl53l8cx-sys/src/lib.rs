@@ -251,10 +251,13 @@ impl From<u8> for FirmwareError {
 }
 
 /// Represents errors that can occur in the driver.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error<E> {
     Bus(E),
     NotAlive,
+    /// A VL53L sensor responded (device id 0xF0) but its silicon revision id
+    /// is not one this driver recognises. The raw revision byte is included.
+    UnknownRevision(u8),
     Firmware(FirmwareError),
     Pin,
 }
@@ -275,6 +278,7 @@ impl<E: std::fmt::Debug> std::fmt::Display for Error<E> {
         match self {
             Error::Bus(e) => write!(f, "Bus error: {:?}", e),
             Error::NotAlive => write!(f, "Sensor not found at address"),
+            Error::UnknownRevision(r) => write!(f, "Unknown sensor revision id: {:#04x}", r),
             Error::Firmware(e) => write!(f, "Firmware error: {:?}", e),
             Error::Pin => write!(f, "Pin error"),
         }
