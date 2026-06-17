@@ -1,0 +1,45 @@
+[package]
+name = "evo-f412re-async"
+version = "0.1.0"
+edition = "2021"
+description = "Async VL53L5CX/VL53L8CX demo for a custom STM32F412RE board (autodetect + patched firmware)."
+
+[dependencies]
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+defmt = "1.0"
+defmt-rtt = "1.1"
+embassy-executor = { version = "0.9.0", default-features = false, features = ["arch-cortex-m", "executor-thread", "defmt"] }
+embassy-stm32 = { version = "0.6.0", features = ["stm32f412re", "time-driver-tim2", "memory-x", "exti", "defmt"] }
+embassy-time = { version = "0.5.1", features = ["defmt", "tick-hz-32_768"] }
+embedded-hal = "1.0"
+panic-probe = { version = "1.0", features = ["print-defmt"] }
+vl53l8cx-async = { path = "../vl53l8cx-async" }
+
+[features]
+default = []
+# Forward driver I2C trace logging.
+defmt-bus-trace = ["vl53l8cx-async/defmt"]
+xtalk = ["vl53l8cx-async/xtalk"]
+motion = ["vl53l8cx-async/motion"]
+thresholds = ["vl53l8cx-async/thresholds"]
+
+[[bin]]
+name = "evo-f412re-async"
+test = false
+
+[dev-dependencies]
+embedded-test = { version = "0.7", features = ["defmt", "embassy"] }
+
+[[test]]
+name = "sensor_async"
+path = "tests/sensor_async.rs"
+harness = false
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"

@@ -47,3 +47,4 @@ nucleo-f401re-async/target
 /.direnv
 /.envrc
 /rpi-zero-2w/target
+/evo-f412re-async/target
