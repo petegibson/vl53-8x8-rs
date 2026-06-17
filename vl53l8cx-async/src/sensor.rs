@@ -47,28 +47,43 @@ pub enum Variant {
     L8,
 }
 
-/// Per-variant constants needed to bring a sensor up.
+/// Per-variant constants and behaviour flags needed to bring a sensor up. The
+/// two parts share the bulk of the init sequence; these capture the documented
+/// differences between the ST ULD `vl53l5cx_init` and `vl53l8cx_init`.
 #[derive(Debug, Clone, Copy)]
 pub struct SensorInfo {
+    /// Which variant this describes.
+    pub variant: Variant,
     /// Expected silicon revision id (reg 1).
     pub revision_id: u8,
     /// Expected firmware CRC, read back after download. `Some` for parts that
-    /// expose a checksum (L8); `None` for parts that don't (L5).
+    /// expose a checksum (L8); `None` for parts that verify the download by
+    /// polling instead (L5).
     pub fw_checksum: Option<u32>,
     /// Overlay applied to [`crate::firmware::BASE_FIRMWARE`] for this variant.
     pub fw_patch: &'static [(usize, u8)],
+    /// Whether init programs the glare filter (L5 only).
+    pub has_glare_filter: bool,
+    /// Whether `get_ranging_data` clamps negative distances to 0 (L5 only).
+    pub clamp_negative_distance: bool,
 }
 
 const L5_INFO: SensorInfo = SensorInfo {
+    variant: Variant::L5,
     revision_id: 0x02,
     fw_checksum: None,
     fw_patch: L5_FW_PATCH,
+    has_glare_filter: true,
+    clamp_negative_distance: true,
 };
 
 const L8_INFO: SensorInfo = SensorInfo {
+    variant: Variant::L8,
     revision_id: 0x0C,
     fw_checksum: Some(VL53L8CX_FW_CHECKSUM),
     fw_patch: L8_FW_PATCH,
+    has_glare_filter: false,
+    clamp_negative_distance: false,
 };
 
 impl Variant {
@@ -197,5 +212,16 @@ mod tests {
         assert_eq!(Variant::L5.info().fw_patch.len(), 7);
         assert_eq!(Variant::L8.info().fw_checksum, Some(VL53L8CX_FW_CHECKSUM));
         assert_eq!(Variant::L5.info().fw_checksum, None);
+    }
+
+    #[test]
+    fn variant_quirk_flags() {
+        let l5 = Variant::L5.info();
+        let l8 = Variant::L8.info();
+        assert_eq!(l5.variant, Variant::L5);
+        assert_eq!(l8.variant, Variant::L8);
+        // Glare filter and negative-distance clamp are L5-only.
+        assert!(l5.has_glare_filter && l5.clamp_negative_distance);
+        assert!(!l8.has_glare_filter && !l8.clamp_negative_distance);
     }
 }

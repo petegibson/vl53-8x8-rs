@@ -315,7 +315,13 @@ where
     }
 
     pub async fn get_ranging_data(&mut self) -> Result<ResultsData, Error<BUS::Error>> {
-        ops::get_ranging_data(&mut self.bus, self.address, &mut self.stdev).await
+        ops::get_ranging_data(
+            &mut self.bus,
+            self.address,
+            &mut self.stdev,
+            self.variant.info().clamp_negative_distance,
+        )
+        .await
     }
 
     /// Poll for data ready using async delay between checks (no INT pin needed).

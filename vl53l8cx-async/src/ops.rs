@@ -1,9 +1,12 @@
 use crate::bus::VlBusAsync;
 use crate::firmware::FirmwareSource;
-use crate::sensor::SensorInfo;
+use crate::sensor::{SensorInfo, Variant};
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
 use vl53l8cx_sys::*;
+
+/// L5-only DCI index for the glare filter (absent on the VL53L8CX).
+const VL53L5CX_GLARE_FILTER: u16 = 0xE108;
 
 /// Swap endianness of 4-byte groups in a buffer.
 pub fn swap_buffer(buf: &mut [u8], len: usize) {
@@ -387,6 +390,7 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     info: &SensorInfo,
 ) -> Result<(), Error<BUS::Error>> {
     stdev.is_auto_stop_enabled = 0;
+    let is_l5 = info.variant == Variant::L5;
 
     // SW reboot sequence
     bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
@@ -429,21 +433,17 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     bus.write_byte(addr, 0x000E, 0x01).await.map_err(Error::Bus)?;
     bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
 
-    // Enable FW access
-    bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
-    bus.write_byte(addr, 0x06, 0x01).await.map_err(Error::Bus)?;
-    poll_for_answer(
-        bus,
-        addr,
-        delay,
-        &mut stdev.temp_buffer,
-        1,
-        0,
-        0x21,
-        0xFF,
-        0x04,
-    )
-    .await?;
+    // Enable FW access. L5 and L8 use a different register write and poll mask
+    // here (L5 polls 0x21 & 0x10 == 0x10; L8 writes 0x06 and polls 0x21 & 0xFF).
+    if is_l5 {
+        bus.write_byte(addr, 0x03, 0x0D).await.map_err(Error::Bus)?;
+        bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+        poll_for_answer(bus, addr, delay, &mut stdev.temp_buffer, 1, 0, 0x21, 0x10, 0x10).await?;
+    } else {
+        bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+        bus.write_byte(addr, 0x06, 0x01).await.map_err(Error::Bus)?;
+        poll_for_answer(bus, addr, delay, &mut stdev.temp_buffer, 1, 0, 0x21, 0xFF, 0x04).await?;
+    }
 
     bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
 
@@ -468,10 +468,17 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     bus.write_byte(addr, 0x219, 0x00).await.map_err(Error::Bus)?;
     bus.write_byte(addr, 0x21B, 0x00).await.map_err(Error::Bus)?;
 
-    // Wake up MCU
+    // Wake up MCU (L5 toggles GO1 access off and issues two extra 0x20 writes)
     bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
     let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
+    if is_l5 {
+        bus.write_byte(addr, 0x0C, 0x00).await.map_err(Error::Bus)?;
+    }
     bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+    if is_l5 {
+        bus.write_byte(addr, 0x20, 0x07).await.map_err(Error::Bus)?;
+        bus.write_byte(addr, 0x20, 0x06).await.map_err(Error::Bus)?;
+    }
 
     // Download firmware into the sensor in 3 banks (32KB + 32KB + 20KB), each
     // written to device address 0 of its own page. Bytes are pulled from the
@@ -492,11 +499,18 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     }
     bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
 
-    // Check if FW correctly downloaded
-    bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
-    bus.write_byte(addr, 0x06, 0x03).await.map_err(Error::Bus)?;
-
-    delay.delay_ms(5).await;
+    // Check if FW correctly downloaded. L5 verifies by polling; L8 writes 0x06
+    // and waits (the CRC is checked separately further down for L8).
+    if is_l5 {
+        bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
+        bus.write_byte(addr, 0x03, 0x0D).await.map_err(Error::Bus)?;
+        bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+        poll_for_answer(bus, addr, delay, &mut stdev.temp_buffer, 1, 0, 0x21, 0x10, 0x10).await?;
+    } else {
+        bus.write_byte(addr, 0x7FFF, 0x01).await.map_err(Error::Bus)?;
+        bus.write_byte(addr, 0x06, 0x03).await.map_err(Error::Bus)?;
+        delay.delay_ms(5).await;
+    }
     bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
     let _tmp = bus.read_byte(addr, 0x7FFF).await.map_err(Error::Bus)?;
     bus.write_byte(addr, 0x0C, 0x01).await.map_err(Error::Bus)?;
@@ -626,6 +640,23 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     )
     .await?;
 
+    // Glare filter (L5 only): two read-modify-writes into the glare-filter DCI
+    // block, enabling the filter at byte positions 0x26 then 0x25.
+    if info.has_glare_filter {
+        let mut glare = [0u8; 40];
+        let one = [1u8];
+        dci_replace(
+            bus, addr, delay, &mut stdev.temp_buffer, &mut glare,
+            VL53L5CX_GLARE_FILTER as u32, 40, &one, 0x26,
+        )
+        .await?;
+        dci_replace(
+            bus, addr, delay, &mut stdev.temp_buffer, &mut glare,
+            VL53L5CX_GLARE_FILTER as u32, 40, &one, 0x25,
+        )
+        .await?;
+    }
+
     Ok(())
 }
 
@@ -672,6 +703,7 @@ pub async fn get_ranging_data<BUS: VlBusAsync>(
     bus: &mut BUS,
     addr: SevenBitAddress,
     stdev: &mut VL53L8CX_Configuration,
+    clamp_negative_distance: bool,
 ) -> Result<VL53L8CX_ResultsData, Error<BUS::Error>> {
     let read_size = stdev.data_read_size as usize;
     bus.read(addr, 0x0000, &mut stdev.temp_buffer[..read_size])
@@ -802,6 +834,10 @@ pub async fn get_ranging_data<BUS: VlBusAsync>(
         #[cfg(not(feature = "disable-distance"))]
         for v in results.distance_mm[..zones].iter_mut() {
             *v /= 4;
+            // L5 clamps negative distances to 0; L8 leaves them signed.
+            if clamp_negative_distance && *v < 0 {
+                *v = 0;
+            }
         }
         #[cfg(not(feature = "disable-reflectance"))]
         for v in results.reflectance[..zones].iter_mut() {
