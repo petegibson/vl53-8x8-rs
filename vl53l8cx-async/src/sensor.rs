@@ -37,6 +37,21 @@ pub const L5_FW_PATCH: &[(usize, u8)] = &[
 /// Empty overlay: [`crate::firmware::BASE_FIRMWARE`] is already the L8 image.
 pub const L8_FW_PATCH: &[(usize, u8)] = &[];
 
+/// Patch overlaying the shared (L8) `DEFAULT_CONFIGURATION` to produce the
+/// VL53L5CX default configuration. Five bytes in the 972-byte blob. Offsets are
+/// in the fully-resolved array (the `FW_NBTAR_RANGING` macro at index 107 is the
+/// same value on both parts). Verified against ST ULD 2.0.1.
+pub const L5_CONFIG_PATCH: &[(usize, u8)] = &[
+    (0x01EE, 0x0C),
+    (0x01EF, 0xCD),
+    (0x01F6, 0x26),
+    (0x02B5, 0x01),
+    (0x02B9, 0x00),
+];
+
+/// Empty overlay: the shared default configuration is already the L8 one.
+pub const L8_CONFIG_PATCH: &[(usize, u8)] = &[];
+
 /// A supported sensor variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -62,10 +77,20 @@ pub struct SensorInfo {
     pub fw_checksum: Option<u32>,
     /// Overlay applied to [`crate::firmware::BASE_FIRMWARE`] for this variant.
     pub fw_patch: &'static [(usize, u8)],
+    /// Overlay applied to the shared default configuration for this variant.
+    pub config_patch: &'static [(usize, u8)],
     /// Whether init programs the glare filter (L5 only).
     pub has_glare_filter: bool,
     /// Whether `get_ranging_data` clamps negative distances to 0 (L5 only).
     pub clamp_negative_distance: bool,
+    /// Whether `start_ranging` performs the laser-safety check (L8 only).
+    pub has_laser_safety_check: bool,
+    /// Whether the part supports deep-sleep power mode (L8 only).
+    pub has_deep_sleep: bool,
+    /// Whether the part has the external sync pin (L8 only).
+    pub has_sync_pin: bool,
+    /// Whether the part has internal charge-pump control (L5 only).
+    pub has_internal_cp: bool,
 }
 
 const L5_INFO: SensorInfo = SensorInfo {
@@ -73,8 +98,13 @@ const L5_INFO: SensorInfo = SensorInfo {
     revision_id: 0x02,
     fw_checksum: None,
     fw_patch: L5_FW_PATCH,
+    config_patch: L5_CONFIG_PATCH,
     has_glare_filter: true,
     clamp_negative_distance: true,
+    has_laser_safety_check: false,
+    has_deep_sleep: false,
+    has_sync_pin: false,
+    has_internal_cp: true,
 };
 
 const L8_INFO: SensorInfo = SensorInfo {
@@ -82,8 +112,13 @@ const L8_INFO: SensorInfo = SensorInfo {
     revision_id: 0x0C,
     fw_checksum: Some(VL53L8CX_FW_CHECKSUM),
     fw_patch: L8_FW_PATCH,
+    config_patch: L8_CONFIG_PATCH,
     has_glare_filter: false,
     clamp_negative_distance: false,
+    has_laser_safety_check: true,
+    has_deep_sleep: true,
+    has_sync_pin: true,
+    has_internal_cp: false,
 };
 
 impl Variant {
@@ -220,8 +255,20 @@ mod tests {
         let l8 = Variant::L8.info();
         assert_eq!(l5.variant, Variant::L5);
         assert_eq!(l8.variant, Variant::L8);
-        // Glare filter and negative-distance clamp are L5-only.
-        assert!(l5.has_glare_filter && l5.clamp_negative_distance);
-        assert!(!l8.has_glare_filter && !l8.clamp_negative_distance);
+        // L5-only behaviours.
+        assert!(l5.has_glare_filter && l5.clamp_negative_distance && l5.has_internal_cp);
+        assert!(!l8.has_glare_filter && !l8.clamp_negative_distance && !l8.has_internal_cp);
+        // L8-only behaviours.
+        assert!(l8.has_laser_safety_check && l8.has_deep_sleep && l8.has_sync_pin);
+        assert!(!l5.has_laser_safety_check && !l5.has_deep_sleep && !l5.has_sync_pin);
+    }
+
+    #[test]
+    fn config_patch_is_l5_only_and_in_bounds() {
+        assert!(Variant::L8.info().config_patch.is_empty());
+        let p = Variant::L5.info().config_patch;
+        assert_eq!(p.len(), 5);
+        // Every patch offset must lie inside the 972-byte config blob.
+        assert!(p.iter().all(|&(o, _)| o < 972));
     }
 }

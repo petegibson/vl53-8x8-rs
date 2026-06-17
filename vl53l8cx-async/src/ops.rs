@@ -596,9 +596,14 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     )
     .await?;
 
-    // Send default configuration
-    let default_cfg = unsafe { &VL53L8CX_DEFAULT_CONFIGURATION };
-    bus.write(addr, 0x2C34, default_cfg)
+    // Send default configuration. The shared base is the L8 blob; apply the
+    // variant config overlay (5 bytes for L5) into temp_buffer before sending.
+    let cfg_len = VL53L8CX_CONFIGURATION_SIZE as usize;
+    stdev.temp_buffer[..cfg_len].copy_from_slice(unsafe { &VL53L8CX_DEFAULT_CONFIGURATION });
+    for &(off, val) in info.config_patch {
+        stdev.temp_buffer[off] = val;
+    }
+    bus.write(addr, 0x2C34, &stdev.temp_buffer[..cfg_len])
         .await
         .map_err(Error::Bus)?;
     poll_for_answer(
@@ -888,6 +893,7 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
     addr: SevenBitAddress,
     delay: &mut D,
     stdev: &mut VL53L8CX_Configuration,
+    has_laser_safety_check: bool,
 ) -> Result<(), Error<BUS::Error>> {
     // Get current resolution (use local buffer to avoid corrupting offset_data)
     let mut zone_buf = [0u8; 8];
@@ -1066,20 +1072,22 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
         return Err(Error::Firmware(FirmwareError::Unknown(VL53L8CX_STATUS_ERROR)));
     }
 
-    // Ensure no laser safety fault
-    let mut safety_buf = [0u8; 8];
-    dci_read(
-        bus,
-        addr,
-        delay,
-        &mut stdev.temp_buffer,
-        &mut safety_buf,
-        0xE0C4,
-        8,
-    )
-    .await?;
-    if safety_buf[0x6] != 0 {
-        return Err(Error::Firmware(FirmwareError::LaserSafety));
+    // Ensure no laser safety fault (L8 only; the L5 ULD has no such check).
+    if has_laser_safety_check {
+        let mut safety_buf = [0u8; 8];
+        dci_read(
+            bus,
+            addr,
+            delay,
+            &mut stdev.temp_buffer,
+            &mut safety_buf,
+            0xE0C4,
+            8,
+        )
+        .await?;
+        if safety_buf[0x6] != 0 {
+            return Err(Error::Firmware(FirmwareError::LaserSafety));
+        }
     }
 
     Ok(())

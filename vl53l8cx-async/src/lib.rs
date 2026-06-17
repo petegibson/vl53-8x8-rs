@@ -303,7 +303,14 @@ where
     }
 
     pub async fn start_ranging(&mut self) -> Result<(), Error<BUS::Error>> {
-        ops::start_ranging(&mut self.bus, self.address, &mut self.delay, &mut self.stdev).await
+        ops::start_ranging(
+            &mut self.bus,
+            self.address,
+            &mut self.delay,
+            &mut self.stdev,
+            self.variant.info().has_laser_safety_check,
+        )
+        .await
     }
 
     pub async fn stop_ranging(&mut self) -> Result<(), Error<BUS::Error>> {
@@ -577,6 +584,10 @@ where
     }
 
     pub async fn set_power_mode(&mut self, mode: PowerMode) -> Result<(), Error<BUS::Error>> {
+        // Deep sleep is L8 only; reject it on parts without it (e.g. L5).
+        if mode == PowerMode::DeepSleep && !self.variant.info().has_deep_sleep {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
         let current = self.get_power_mode().await?;
         if mode == current {
             return Ok(());
@@ -633,7 +644,9 @@ where
 
         let mode = match tmp {
             0x04 => PowerMode::Wakeup,
-            0x02 => {
+            // Deep-sleep state (reg 0x000F == 0x43) only exists on the L8; on
+            // parts without it, 0x02 is plain sleep.
+            0x02 if self.variant.info().has_deep_sleep => {
                 let mode_reg = self.bus.read_byte(self.address, 0x000F).await.map_err(Error::Bus)?;
                 if mode_reg == 0x43 {
                     PowerMode::DeepSleep
@@ -641,6 +654,7 @@ where
                     PowerMode::Sleep
                 }
             }
+            0x02 => PowerMode::Sleep,
             _ => {
                 self.bus.write_byte(self.address, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
                 return Err(Error::Firmware(FirmwareError::Unknown(sys::VL53L8CX_STATUS_ERROR)));
@@ -672,7 +686,11 @@ where
         Ok(u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]))
     }
 
+    /// Enable/disable the external synchronisation pin (VL53L8CX only).
     pub async fn set_external_sync_pin_enable(&mut self, enabled: bool) -> Result<(), Error<BUS::Error>> {
+        if !self.variant.info().has_sync_pin {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
         let mut buf = [0u8; 4];
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
@@ -693,7 +711,11 @@ where
         ).await
     }
 
+    /// Read the external synchronisation pin enable state (VL53L8CX only).
     pub async fn get_external_sync_pin_enable(&mut self) -> Result<bool, Error<BUS::Error>> {
+        if !self.variant.info().has_sync_pin {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
         let mut buf = [0u8; 4];
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
@@ -701,6 +723,39 @@ where
             sys::VL53L8CX_DCI_SYNC_PIN as u32, 4,
         ).await?;
         Ok((buf[3] & 0x02) != 0)
+    }
+
+    /// Enable the internal charge pump (VL53L5CX only).
+    pub async fn enable_internal_cp(&mut self) -> Result<(), Error<BUS::Error>> {
+        self.set_internal_cp(true).await
+    }
+
+    /// Disable the internal charge pump (VL53L5CX only).
+    pub async fn disable_internal_cp(&mut self) -> Result<(), Error<BUS::Error>> {
+        self.set_internal_cp(false).await
+    }
+
+    async fn set_internal_cp(&mut self, enable: bool) -> Result<(), Error<BUS::Error>> {
+        if !self.variant.info().has_internal_cp {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+        // Two read-modify-writes into the internal-CP DCI block: vcsel bootup
+        // FSM at 0x0A and analog dynamic pad 0 at 0x0E (inverted of each other).
+        let vcsel_bootup_fsm: u8 = enable as u8;
+        let analog_dynamic_pad_0: u8 = !enable as u8;
+        let mut data = [0u8; 16];
+        ops::dci_replace(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut data,
+            sys::VL53L8CX_DCI_INTERNAL_CP as u32, 16,
+            &[vcsel_bootup_fsm], 0x0A,
+        ).await?;
+        ops::dci_replace(
+            &mut self.bus, self.address, &mut self.delay,
+            &mut self.stdev.temp_buffer, &mut data,
+            sys::VL53L8CX_DCI_INTERNAL_CP as u32, 16,
+            &[analog_dynamic_pad_0], 0x0E,
+        ).await
     }
 }
 
