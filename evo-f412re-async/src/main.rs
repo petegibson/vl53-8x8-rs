@@ -15,6 +15,7 @@
 //! - PWR_EN       PD2  (active LOW: low = sensor powered)
 //! - I2C_RESET    PB8  (active HIGH: high = reset asserted)
 //! - LPn (2nd)    PB9  (gates the optional second sensor; held low here)
+//! - INFO LED     PA8  (onboard, active low: low = on)
 //!
 //! The board carries up to two sensors sharing one I2C bus. Only the always-on
 //! sensor responds at the default address (0x52); the second sensor's LPn is on
@@ -25,6 +26,7 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 use embassy_executor::Spawner;
+use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::i2c::{Config as I2cConfig, I2c};
 use embassy_stm32::time::Hertz;
@@ -35,6 +37,10 @@ use vl53l8cx_async::{Resolution, Vl53l8cx};
 // --- Configuration ---
 const RESOLUTION: Resolution = Resolution::Res4x4;
 const RANGING_FREQ_HZ: u8 = 10;
+/// Light the LED when any zone reports a valid target at or within this range.
+const OBJECT_THRESHOLD_MM: i16 = 200;
+/// VL53 target status for a fully-valid range measurement.
+const STATUS_VALID: u8 = 5;
 
 // I2C1 + DMA interrupt bindings (embassy 0.6 routes DMA completion through
 // these handlers for async transfers).
@@ -72,6 +78,17 @@ async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(config);
     defmt::info!("VL53Lxcx async demo starting (STM32F412RE)");
 
+    // Onboard info LED on PA8 (active low: drive low to light it).
+    let mut led = Output::new(p.PA8, Level::High, Speed::Low);
+
+    // Flash twice on startup, before bringing up the sensor.
+    for _ in 0..2 {
+        led.set_low(); // on
+        Timer::after_millis(120).await;
+        led.set_high(); // off
+        Timer::after_millis(120).await;
+    }
+
     // --- Sensor power / reset control pins ---
     // Initial levels = sensor off, reset asserted.
     let mut pwr_en = Output::new(p.PD2, Level::High, Speed::Low); // active low
@@ -105,9 +122,26 @@ async fn main(_spawner: Spawner) {
 
     let mut sensor = Vl53l8cx::new(i2c, Delay);
 
-    // init() autodetects the variant and uploads its patched firmware.
-    defmt::info!("Initialising sensor...");
-    if let Err(e) = sensor.init().await {
+    // init() autodetects the variant and uploads its patched firmware. Flash
+    // the LED continuously throughout by racing a blink loop against init() on
+    // the executor — init() yields during each I2C/DMA transfer, letting the
+    // blink loop run.
+    defmt::info!("Initialising sensor (uploading firmware)...");
+    let init_result = match select(sensor.init(), async {
+        loop {
+            led.set_low(); // on
+            Timer::after_millis(80).await;
+            led.set_high(); // off
+            Timer::after_millis(80).await;
+        }
+    })
+    .await
+    {
+        Either::First(result) => result,
+        Either::Second(()) => unreachable!("blink loop never returns"),
+    };
+    led.set_high(); // ensure LED off once upload completes
+    if let Err(e) = init_result {
         defmt::error!("Sensor init failed: {}", defmt::Debug2Format(&e));
         defmt::error!("Check sensor power (PD2), I2C reset (PB8), and bus wiring");
         loop {}
@@ -144,7 +178,23 @@ async fn main(_spawner: Spawner) {
 
         match sensor.get_ranging_data().await {
             Ok(data) => {
-                defmt::info!("--- Distance (mm) ---");
+                // Light the LED if any zone has a valid target within the
+                // threshold. INFO_LED is active low (low = on).
+                let zones = grid * grid;
+                let object_near = data.distance_mm[..zones]
+                    .iter()
+                    .zip(data.target_status[..zones].iter())
+                    .any(|(&d, &status)| status == STATUS_VALID && d > 0 && d <= OBJECT_THRESHOLD_MM);
+                if object_near {
+                    led.set_low();
+                } else {
+                    led.set_high();
+                }
+
+                defmt::info!(
+                    "--- Distance (mm){} ---",
+                    if object_near { "  [OBJECT <200mm]" } else { "" }
+                );
                 for row in 0..grid {
                     let b = row * grid;
                     match grid {
