@@ -17,6 +17,17 @@ pub fn swap_buffer(buf: &mut [u8], len: usize) {
 }
 
 /// Poll the sensor for an expected answer. 2s timeout, 10ms intervals.
+//
+// Porting note on error handling: the ST C driver threads a `status |= cmd()`
+// accumulator (bitwise OR-assign — it never short-circuits, so every step runs
+// regardless of prior failures) and returns the accumulated status at the end.
+// This port uses `?` and returns early on the first error instead — generally
+// safer, but a behavioural divergence if you ever chase a quirk where ST's
+// "keep going after an error" was load-bearing. The one place it demonstrably
+// matters: ST's poll returns a timeout error but its callers ignore it and
+// proceed to read/write the response anyway (the sensor usually has valid data
+// despite the status), so this fn returns `Ok` on timeout (see the tail below)
+// to reproduce that — at the cost of not surfacing the timeout the way ST does.
 pub async fn poll_for_answer<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
     addr: SevenBitAddress,
@@ -289,8 +300,12 @@ pub async fn send_offset_data<BUS: VlBusAsync, D: DelayNs>(
         swap_buffer(temp_buf, buf_size);
     }
 
-    // Shift data: remove 8-byte header
-    for k in 0..(buf_size - 4) {
+    // Shift data left to drop the 8-byte header. Bound to buf_size - 8 so we
+    // only move the actual payload [8, buf_size): the ST driver runs to buf_size
+    // and reads up to 8 bytes past the offset data (harmless there only because
+    // its scratch buffer is oversized and the footer write below overwrites the
+    // tail). buf_size - 8 shifts exactly the payload and reads nothing past it.
+    for k in 0..(buf_size - 8) {
         temp_buf[k] = temp_buf[k + 8];
     }
 
@@ -704,6 +719,34 @@ pub async fn check_data_ready<BUS: VlBusAsync>(
 }
 
 /// Read ranging data from the sensor.
+/// Copy one result block into a fixed-capacity destination field, rejecting any
+/// frame whose block size would overflow it. Guards against a corrupt block
+/// header: an oversized length could otherwise write past the field (UB for the
+/// raw-pointer destinations) or panic on a slice index. `bh_idx` is only used
+/// for diagnostics.
+#[inline]
+fn copy_result_block<E>(
+    dst: *mut u8,
+    cap_bytes: usize,
+    data: &[u8],
+    _bh_idx: u16,
+) -> Result<(), Error<E>> {
+    if data.len() > cap_bytes {
+        #[cfg(feature = "defmt")]
+        defmt::warn!(
+            "corrupt frame (block too big for field): idx={:#06x} block_size={} field_cap={}",
+            _bh_idx,
+            data.len(),
+            cap_bytes
+        );
+        return Err(Error::Firmware(FirmwareError::CorruptedFrame));
+    }
+    // SAFETY: `dst` points to a result field of at least `cap_bytes` bytes, and
+    // we copy exactly `data.len() <= cap_bytes` bytes into it.
+    unsafe { core::slice::from_raw_parts_mut(dst, data.len()) }.copy_from_slice(data);
+    Ok(())
+}
+
 pub async fn get_ranging_data<BUS: VlBusAsync>(
     bus: &mut BUS,
     addr: SevenBitAddress,
@@ -720,9 +763,16 @@ pub async fn get_ranging_data<BUS: VlBusAsync>(
 
     let mut results: VL53L8CX_ResultsData = unsafe { core::mem::zeroed() };
 
-    // Parse block headers starting at position 16
+    // Parse block headers starting at position 16. The data blocks occupy
+    // [16, read_size - 4); the final 4 bytes are the frame footer (a tag whose
+    // id is checked against the header below), NOT a block — parsing it as one
+    // walks off the end. Its first byte is the per-frame streamcount, so the
+    // bogus "block size" it decodes to grows once the streamcount reaches 0x10,
+    // which is why it only bit ~16 frames (3 s @ 5 Hz) into a run.
+    let blocks_end = read_size.saturating_sub(4);
     let mut i = 16usize;
-    while i < read_size {
+    // Need a full 4-byte header before the footer.
+    while i + 4 <= blocks_end {
         // Block header is a 4-byte value: idx(16) | size(12) | type(4)
         let bh = u32::from_le_bytes([
             stdev.temp_buffer[i],
@@ -741,87 +791,90 @@ pub async fn get_ranging_data<BUS: VlBusAsync>(
         };
 
         let data_start = i + 4;
-        let data = &stdev.temp_buffer[data_start..data_start + msize];
+        let data_end = data_start + msize;
+        // A corrupt/misaligned frame can yield a bogus block size that runs past
+        // the buffer; bail out rather than panic on the out-of-range slice.
+        if data_end > read_size {
+            #[cfg(feature = "defmt")]
+            defmt::warn!(
+                "corrupt frame: block at i={} idx={:#06x} size={} runs past read_size={}",
+                i, bh_idx, msize, read_size
+            );
+            return Err(Error::Firmware(FirmwareError::CorruptedFrame));
+        }
+        let data = &stdev.temp_buffer[data_start..data_end];
 
         match bh_idx {
             VL53L8CX_METADATA_IDX => {
-                results.silicon_temp_degc = stdev.temp_buffer[i + 12] as i8;
+                // Silicon temperature lives at byte 12 of the block; only read it
+                // if a corrupt size hasn't left that offset outside the frame.
+                if i + 12 < read_size {
+                    results.silicon_temp_degc = stdev.temp_buffer[i + 12] as i8;
+                }
             }
             #[cfg(not(feature = "disable-ambient"))]
-            VL53L8CX_AMBIENT_RATE_IDX => {
-                let dst = unsafe {
-                    core::slice::from_raw_parts_mut(
-                        results.ambient_per_spad.as_mut_ptr() as *mut u8,
-                        msize,
-                    )
-                };
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_AMBIENT_RATE_IDX => copy_result_block(
+                results.ambient_per_spad.as_mut_ptr() as *mut u8,
+                core::mem::size_of_val(&results.ambient_per_spad),
+                data,
+                bh_idx,
+            )?,
             #[cfg(not(feature = "disable-spads"))]
-            VL53L8CX_SPAD_COUNT_IDX => {
-                let dst = unsafe {
-                    core::slice::from_raw_parts_mut(
-                        results.nb_spads_enabled.as_mut_ptr() as *mut u8,
-                        msize,
-                    )
-                };
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_SPAD_COUNT_IDX => copy_result_block(
+                results.nb_spads_enabled.as_mut_ptr() as *mut u8,
+                core::mem::size_of_val(&results.nb_spads_enabled),
+                data,
+                bh_idx,
+            )?,
             #[cfg(not(feature = "disable-nb-targets"))]
-            VL53L8CX_NB_TARGET_DETECTED_IDX => {
-                let dst = &mut results.nb_target_detected[..msize];
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_NB_TARGET_DETECTED_IDX => copy_result_block(
+                results.nb_target_detected.as_mut_ptr(),
+                core::mem::size_of_val(&results.nb_target_detected),
+                data,
+                bh_idx,
+            )?,
             #[cfg(not(feature = "disable-signal"))]
-            VL53L8CX_SIGNAL_RATE_IDX => {
-                let dst = unsafe {
-                    core::slice::from_raw_parts_mut(
-                        results.signal_per_spad.as_mut_ptr() as *mut u8,
-                        msize,
-                    )
-                };
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_SIGNAL_RATE_IDX => copy_result_block(
+                results.signal_per_spad.as_mut_ptr() as *mut u8,
+                core::mem::size_of_val(&results.signal_per_spad),
+                data,
+                bh_idx,
+            )?,
             #[cfg(not(feature = "disable-range-sigma"))]
-            VL53L8CX_RANGE_SIGMA_MM_IDX => {
-                let dst = unsafe {
-                    core::slice::from_raw_parts_mut(
-                        results.range_sigma_mm.as_mut_ptr() as *mut u8,
-                        msize,
-                    )
-                };
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_RANGE_SIGMA_MM_IDX => copy_result_block(
+                results.range_sigma_mm.as_mut_ptr() as *mut u8,
+                core::mem::size_of_val(&results.range_sigma_mm),
+                data,
+                bh_idx,
+            )?,
             #[cfg(not(feature = "disable-distance"))]
-            VL53L8CX_DISTANCE_IDX => {
-                let dst = unsafe {
-                    core::slice::from_raw_parts_mut(
-                        results.distance_mm.as_mut_ptr() as *mut u8,
-                        msize,
-                    )
-                };
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_DISTANCE_IDX => copy_result_block(
+                results.distance_mm.as_mut_ptr() as *mut u8,
+                core::mem::size_of_val(&results.distance_mm),
+                data,
+                bh_idx,
+            )?,
             #[cfg(not(feature = "disable-reflectance"))]
-            VL53L8CX_REFLECTANCE_EST_PC_IDX => {
-                let dst = &mut results.reflectance[..msize];
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_REFLECTANCE_EST_PC_IDX => copy_result_block(
+                results.reflectance.as_mut_ptr(),
+                core::mem::size_of_val(&results.reflectance),
+                data,
+                bh_idx,
+            )?,
             #[cfg(not(feature = "disable-target-status"))]
-            VL53L8CX_TARGET_STATUS_IDX => {
-                let dst = &mut results.target_status[..msize];
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_TARGET_STATUS_IDX => copy_result_block(
+                results.target_status.as_mut_ptr(),
+                core::mem::size_of_val(&results.target_status),
+                data,
+                bh_idx,
+            )?,
             #[cfg(all(feature = "motion", not(feature = "disable-motion-indicator-output")))]
-            VL53L8CX_MOTION_DETEC_IDX => {
-                let dst = unsafe {
-                    core::slice::from_raw_parts_mut(
-                        &mut results.motion_indicator as *mut _ as *mut u8,
-                        msize,
-                    )
-                };
-                dst.copy_from_slice(data);
-            }
+            VL53L8CX_MOTION_DETEC_IDX => copy_result_block(
+                &mut results.motion_indicator as *mut _ as *mut u8,
+                core::mem::size_of_val(&results.motion_indicator),
+                data,
+                bh_idx,
+            )?,
             _ => {}
         }
         i += 4 + msize;
@@ -881,6 +934,11 @@ pub async fn get_ranging_data<BUS: VlBusAsync>(
     let footer_id = ((stdev.temp_buffer[read_size - 4] as u16) << 8)
         | (stdev.temp_buffer[read_size - 3] as u16);
     if header_id != footer_id {
+        #[cfg(feature = "defmt")]
+        defmt::warn!(
+            "corrupt frame: header/footer id mismatch ({:#06x} != {:#06x})",
+            header_id, footer_id
+        );
         return Err(Error::Firmware(FirmwareError::CorruptedFrame));
     }
 
@@ -1186,3 +1244,76 @@ const VL53L8CX_REFLECTANCE_EST_PC_IDX: u16 = 0xE044;
 const VL53L8CX_TARGET_STATUS_IDX: u16 = 0xE084;
 #[cfg(feature = "motion")]
 const VL53L8CX_MOTION_DETEC_IDX: u16 = 0xD858;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::convert::Infallible;
+    use core::future::Future;
+    use core::pin::pin;
+    use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+    /// Minimal executor: the mock bus never yields, so this just polls to ready.
+    fn block_on<F: Future>(fut: F) -> F::Output {
+        fn raw() -> RawWaker {
+            RawWaker::new(core::ptr::null(), &VTABLE)
+        }
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(|_| raw(), |_| {}, |_| {}, |_| {});
+        let waker = unsafe { Waker::from_raw(raw()) };
+        let mut cx = Context::from_waker(&waker);
+        let mut fut = pin!(fut);
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    /// Bus that returns a fixed result frame for the ranging read.
+    struct FrameBus<'a>(&'a [u8]);
+    impl VlBusAsync for FrameBus<'_> {
+        type Error = Infallible;
+        async fn write(&mut self, _: SevenBitAddress, _: u16, _: &[u8]) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        async fn read(&mut self, _: SevenBitAddress, _: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
+            let n = buf.len().min(self.0.len());
+            buf[..n].copy_from_slice(&self.0[..n]);
+            Ok(())
+        }
+    }
+
+    /// Build a minimal well-formed result frame: a 16-byte header, no data
+    /// blocks, and a 4-byte footer whose first byte carries `streamcount`. The
+    /// header/footer id (bytes 8..10) is set to match. Returned in the on-wire
+    /// (pre-swap) byte order the driver reads.
+    fn make_frame(streamcount: u8) -> [u8; 32] {
+        let read_size = 32;
+        let mut f = [0u8; 32];
+        // Header/footer id must match for the frame to be accepted.
+        f[8] = streamcount;
+        f[read_size - 4] = streamcount;
+        swap_buffer(&mut f, read_size); // post-swap layout -> on-wire order
+        f
+    }
+
+    /// Regression: the trailing footer word must not be parsed as a block. Its
+    /// first byte is the per-frame streamcount; once it reaches 0x10 the decoded
+    /// "block size" became non-zero and walked off the end of the frame.
+    #[test]
+    fn footer_streamcount_is_not_parsed_as_a_block() {
+        for sc in [0x00u8, 0x0F, 0x10, 0x11, 0x80, 0xFF] {
+            let frame = make_frame(sc);
+            let mut stdev: VL53L8CX_Configuration = unsafe { core::mem::zeroed() };
+            stdev.data_read_size = 32;
+            let mut bus = FrameBus(&frame);
+            let result = block_on(get_ranging_data(&mut bus, 0x29, &mut stdev, false));
+            assert!(
+                result.is_ok(),
+                "streamcount {:#04x} parsed the footer as a block: {:?}",
+                sc,
+                result.err()
+            );
+        }
+    }
+}

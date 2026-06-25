@@ -198,12 +198,6 @@ where
         self.set_reset_state(false)?;
         Ok(())
     }
-
-    pub async fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<BUS::Error>> {
-        ops::set_i2c_address(&mut self.bus, self.address, new_address).await?;
-        self.address = new_address;
-        Ok(())
-    }
 }
 
 // --- Interrupt-based data ready (requires Wait) ---
@@ -300,6 +294,12 @@ where
             Err(Error::NotAlive) | Err(Error::UnknownRevision(_)) => Ok(false),
             Err(e) => Err(e),
         }
+    }
+
+    pub async fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<BUS::Error>> {
+        ops::set_i2c_address(&mut self.bus, self.address, new_address).await?;
+        self.address = new_address;
+        Ok(())
     }
 
     pub async fn start_ranging(&mut self) -> Result<(), Error<BUS::Error>> {
