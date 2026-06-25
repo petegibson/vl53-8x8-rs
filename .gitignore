@@ -48,3 +48,8 @@ nucleo-f401re-async/target
 /.envrc
 /rpi-zero-2w/target
 /evo-f412re-async/target
+
+# On-target defmt capture logs
+/evo-f412re-async/logs/
+# Stray cookie jar (not part of the project)
+/cookies
