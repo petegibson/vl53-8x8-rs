@@ -104,6 +104,16 @@ where
 // --- Builder methods ---
 
 impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
+    /// Attach at `address` instead of [`DEFAULT_ADDRESS`], without touching the
+    /// sensor. For re-attaching a handle to a sensor previously moved by
+    /// [`Vl53l8cx::set_i2c_address`]; pair with [`Vl53l8cx::redetect`] to skip
+    /// the firmware re-upload.
+    pub fn with_address(mut self, address: SevenBitAddress) -> Self {
+        self.address = address;
+        self.stdev.platform.address = (address as u16) << 1;
+        self
+    }
+
     pub fn with_reset_pin_active_low<RstNew>(
         self,
         reset_pin: RstNew,
@@ -285,6 +295,16 @@ where
     /// the default ([`Variant::L8`]), not a detected value.
     pub fn variant(&self) -> Variant {
         self.variant
+    }
+
+    /// Re-detect the sensor variant at the current address, without the
+    /// firmware upload done by [`Vl53l8cx::init`]. For handles created with
+    /// [`Vl53l8cx::with_address`] against an already-initialised sensor:
+    /// [`Vl53l8cx::start_ranging`] recomputes all per-session state, so after
+    /// this the handle can resume ranging where the old one left off.
+    pub async fn redetect(&mut self) -> Result<Variant, Error<BUS::Error>> {
+        self.variant = sensor::detect(&mut self.bus, self.address).await?;
+        Ok(self.variant)
     }
 
     /// Returns true if a recognised sensor (VL53L5CX or VL53L8CX) is present.
