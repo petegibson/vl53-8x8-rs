@@ -49,3 +49,6 @@ opt-level = "s"
 debug = 2
 lto = true
 opt-level = "s"
+
+# Standalone root: this demo is excluded from the parent workspace.
+[workspace]
