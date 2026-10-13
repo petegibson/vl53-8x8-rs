@@ -3,9 +3,16 @@ name = "vl53l8cx-uld-sys"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
-description = "Low-level FFI bindings for the STMicroelectronics VL53L8CX Ultra Lite Driver (ULD)."
 license = "BSD-3-Clause"
+description = "Raw FFI bindings (bindgen + cc) to the STMicroelectronics VL53L8CX Ultra Lite Driver (ULD) C sources."
+documentation = "https://docs.rs/vl53l8cx-uld-sys"
+readme = "README.md"
+keywords = ["vl53l8cx", "tof", "embedded-hal", "no-std", "uld"]
+categories = ["embedded", "no-std", "hardware-support"]
 links = "vl53l8cx_uld"
+
+[package.metadata.docs.rs]
+features = ["xtalk", "motion", "thresholds"]
 
 [dependencies]
 cty = "0.2"

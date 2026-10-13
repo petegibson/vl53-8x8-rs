@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
-description = "An async, platform-agnostic Rust driver for the STMicroelectronics VL53L8CX Time-of-Flight sensor."
+description = "Pure-Rust async embedded-hal driver for the STMicroelectronics VL53L5CX and VL53L8CX 8x8 multizone Time-of-Flight sensors (variant autodetect, no C toolchain)."
+documentation = "https://docs.rs/vl53-8x8"
+readme = "README.md"
+keywords = ["vl53l5cx", "vl53l8cx", "tof", "embedded-hal", "no-std"]
+categories = ["embedded", "no-std", "hardware-support"]
+
+[package.metadata.docs.rs]
+features = ["xtalk", "motion", "thresholds"]
 
 [dependencies]
 vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.0" }

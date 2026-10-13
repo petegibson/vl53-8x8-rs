@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
-description = "A platform-agnostic Rust driver for the STMicroelectronics VL53L8CX Time-of-Flight sensor."
+description = "Safe blocking embedded-hal wrapper over the STMicroelectronics VL53L8CX Ultra Lite Driver (ULD) for the VL53L8CX 8x8 Time-of-Flight sensor."
+documentation = "https://docs.rs/vl53l8cx-uld"
+readme = "README.md"
+keywords = ["vl53l8cx", "tof", "embedded-hal", "no-std", "uld"]
+categories = ["embedded", "no-std", "hardware-support"]
+
+[package.metadata.docs.rs]
+features = ["xtalk", "motion", "thresholds"]
 
 [dependencies]
 embedded-hal = "1.0.0" # Using the stable 1.0 version of the hardware abstraction layer.

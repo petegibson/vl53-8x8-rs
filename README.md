@@ -1,26 +1,40 @@
-# VL53L8CX Driver (Rust)
+# VL53L5CX / VL53L8CX Drivers (Rust)
 
-[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](LICENSE-MIT)
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 [![Mermaid Support](https://img.shields.io/badge/VS%20Code-Mermaid%20Support-blue?logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid)
 
-A platform-agnostic Rust driver for the **STMicroelectronics VL53L8CX**
-Time-of-Flight (ToF) 8×8 multi-zone ranging sensor.
+Platform-agnostic Rust drivers for the **STMicroelectronics VL53L5CX and
+VL53L8CX** 8×8 multizone Time-of-Flight (ToF) ranging sensors, built on
+`embedded-hal` 1.0.
 
-The workspace contains two driver crates plus three example/demo crates:
+Two drivers share one set of types:
 
-| Crate                    | Role                                                                 |
-| ------------------------ | -------------------------------------------------------------------- |
-| `vl53l8cx-uld-sys`           | Low-level FFI bindings + statically-linked ST ULD C source.          |
-| `vl53l8cx-uld`        | Safe blocking API on top of the C ULD; uses `embedded-hal` 1.0.      |
-| `vl53-8x8`         | Pure-Rust async port (no C runtime); uses `embedded-hal-async` 1.0.  |
-| `nucleo-f401re/`         | Bare-metal blocking demo on STM32F401RE Nucleo, I²C or SPI bus.      |
-| `nucleo-f401re-async/`   | Bare-metal async (Embassy) demo on STM32F401RE, I²C or SPI bus.      |
-| `rpi-zero-2w/`           | Linux demo on a Raspberry Pi Zero 2W, SPI via `linux-embedded-hal`.  |
+- **`vl53-8x8`** — pure Rust, async, no C toolchain. Autodetects whether a
+  VL53L5CX or a VL53L8CX is connected and uploads one shared firmware image
+  patched per variant (the two differ by only a few bytes).
+- **`vl53l8cx-uld`** — blocking, wraps ST's official Ultra Lite Driver (ULD)
+  C code via `vl53l8cx-uld-sys`. VL53L8CX only; needs libclang to build.
+
+## Crates
+
+| Crate / directory          | Role                                                                    |
+| -------------------------- | ----------------------------------------------------------------------- |
+| [`vl53-8x8-types`](./vl53-8x8-types) | Shared enums, `Error`, plugin types. `no_std`, zero dependencies.       |
+| [`vl53-8x8`](./vl53-8x8)             | Pure-Rust async driver for VL53L5CX + VL53L8CX (`embedded-hal-async`).  |
+| [`vl53l8cx-uld-sys`](./vl53l8cx-uld-sys) | bindgen + `cc` over ST's VL53L8CX ULD C sources and firmware.          |
+| [`vl53l8cx-uld`](./vl53l8cx-uld)     | Safe blocking `embedded-hal` wrapper over `vl53l8cx-uld-sys`.           |
+| [`nucleo-f401re/`](./nucleo-f401re)  | Demo: blocking (`vl53l8cx-uld`) on STM32F401RE Nucleo + X-NUCLEO-53L8A1, I²C or SPI (`spi-bus`). |
+| [`nucleo-f401re-async/`](./nucleo-f401re-async) | Demo: async (`vl53-8x8`, Embassy) on the same board.           |
+| [`evo-f412re-async/`](./evo-f412re-async) | Demo: async (`vl53-8x8`) on a custom STM32F412RE board, DMA I²C, L5 or L8, two sensors on one bus. |
+| [`rpi-zero-2w/`](./rpi-zero-2w)      | Demo: Linux on Raspberry Pi Zero 2W, both drivers, SPI via `linux-embedded-hal`. |
+
+The demo crates are `publish = false` and are standalone workspace roots, so
+each is built from its own directory.
 
 ## Verified platforms
 
-These are the configurations actively built and run against real hardware
-in this repository:
+These are the configurations actively built and run against real hardware in
+this repository:
 
 * **Bare-metal Cortex-M4** — STM32F401RE Nucleo board with the
   X-NUCLEO-53L8A1 expansion shield, both I²C and SPI, both blocking
@@ -37,174 +51,136 @@ traits — but only the targets above have been validated end-to-end.
 
 ## Usage
 
-The driver is constructed from an `embedded-hal` bus and delay, optionally
-a reset pin (LPn) and interrupt pin (data ready), then `init()` uploads the
-firmware. Either `new` (I²C) or `new_spi` (SPI) gives a typed handle:
+Both drivers follow the same shape: construct from a bus and a delay,
+optionally attach a reset (LPn) and interrupt pin, `init()` uploads the
+~86 KB firmware, then configure and range. All calls return
+`Result<_, Error<BusError>>`.
 
-```rust
-use vl53l8cx_uld::{Vl53l8cx, Resolution};
+### Async, pure Rust (`vl53-8x8`)
 
-// I²C
-let mut sensor = Vl53l8cx::new(i2c, delay)
+```rust,ignore
+use vl53_8x8::{Resolution, Sensor};
+
+let mut sensor = Sensor::new(i2c, delay)            // or Sensor::new_spi(spi_device, delay)
+    .with_reset_pin_active_low(lpn);
+sensor.reset().await?;
+sensor.init().await?;                                // detects L5CX vs L8CX, uploads patched firmware
+defmt::info!("variant: {:?}", sensor.variant());
+
+sensor.set_resolution(Resolution::Res4x4).await?;
+sensor.set_ranging_frequency_hz(10).await?;
+sensor.start_ranging().await?;
+loop {
+    sensor.poll_data_ready().await?;                 // or wait_for_data_ready() with an INT pin
+    let frame = sensor.get_ranging_data().await?;
+    // frame.distance_mm: [i16; 64], 8x8 layout regardless of resolution
+}
+```
+
+### Blocking, ST ULD (`vl53l8cx-uld`)
+
+```rust,ignore
+use vl53l8cx_uld::{Resolution, Vl53l8cx};
+
+vl53l8cx_uld::bind_platform_driver!(MyI2c, MyDelay); // once per binary; `_spi!` variant for SPI
+
+let mut sensor = Vl53l8cx::new(i2c, delay)           // or Vl53l8cx::new_spi(spi_device, delay)
     .with_reset_pin_active_low(lpn)
     .with_interrupt_pin_active_low(int);
-sensor.reset()?;
-sensor.init()?;          // ← uploads ~86 KB firmware blob to the chip
-
-// or SPI (Mode 3, MSB-first)
-let mut sensor = Vl53l8cx::new_spi(spi, delay)
-    .with_reset_pin_active_low(lpn);
 sensor.reset()?;
 sensor.init()?;
 
 sensor.set_resolution(Resolution::Res4x4)?;
 sensor.set_ranging_frequency_hz(10)?;
 sensor.start_ranging()?;
-
 loop {
     if sensor.check_data_ready()? {
-        let data = sensor.get_ranging_data()?;
-        // data.distance_mm is [i16; 64] (8×8 layout regardless of resolution)
+        let frame = sensor.get_ranging_data()?;
     }
 }
 ```
 
-The async crate (`vl53-8x8`) has the same shape with `.await` on
-each call.
-
-For runnable end-to-end examples see the demo crates listed above; each
-has its own README covering wiring, host setup, and build/run steps.
+Each crate's README has the full feature table and API notes; the demo crates
+show complete board bring-up sequences.
 
 ## Cargo features
 
-Both `vl53l8cx-uld` and `vl53-8x8` accept the same feature flags
-to opt in to ULD plugins or out of unused result fields, trading flash
-and RAM:
+Both drivers accept the same feature flags, forwarded to `vl53-8x8-types`
+(and, for the blocking driver, to the C build):
 
 | Feature        | Effect                                                          |
 | -------------- | --------------------------------------------------------------- |
 | `xtalk`        | Crosstalk calibration support (cover-glass workflows).          |
 | `motion`       | Motion indicator plugin.                                        |
 | `thresholds`   | Per-zone detection thresholds for interrupt triggers.           |
-| `targets-1..4` | Number of targets tracked per zone (default `targets-1`). Pick **exactly one**. |
-| `disable-*`    | Drop optional output fields (`ambient`, `signal`, `reflectance`, `nb-spads`, etc.) to shrink `ResultsData` at build time. |
-| `std`          | Adds `std::error::Error` / `Display` impls on `Error`.          |
-
-## API reference (selected)
-
-All driver methods return `Result<T, Error<BusError>>`. The full set lives
-in [`vl53l8cx-uld/src/lib.rs`](./vl53l8cx-uld/src/lib.rs) — a
-condensed view of the most-used calls:
-
-### Construction & control
-
-| Method                            | Description |
-| --------------------------------- | ----------- |
-| `new(i2c, delay)`                 | I²C constructor; doesn't talk to the chip. |
-| `new_spi(spi, delay)`             | SPI constructor (Mode 3). |
-| `with_reset_pin_active_low/high`  | Builder: attach an LPn `OutputPin`. |
-| `with_interrupt_pin_active_low/high` | Builder: attach a data-ready `InputPin`. |
-| `reset()`                         | Pulse LPn (requires reset pin). |
-| `init()`                          | `is_alive` probe + firmware upload (~86 KB). |
-| `is_alive()`                      | Read chip ID; `true` if it matches `0xF0`/`0x0C`. |
-| `set_i2c_address(addr)`           | Change runtime I²C address (volatile). |
-
-### Ranging configuration
-
-| Method                            | Description |
-| --------------------------------- | ----------- |
-| `set_resolution(Res4x4 / Res8x8)` | Output grid (4×4 max 60 Hz, 8×8 max 15 Hz). |
-| `set_ranging_frequency_hz(u8)`    | Frame rate. |
-| `set_ranging_mode(Continuous / Autonomous)` | Continuous = back-to-back, Autonomous = lower power. |
-| `set_integration_time_ms(u32)`    | Exposure (2–1000 ms, Autonomous mode only). |
-| `set_target_order(Closest / Strongest)` | Multi-target ordering. |
-| `set_sharpener_percent(u8)`       | Edge-sharpener filter, 0–99 %. |
-| `set_power_mode(...)` / `get_power_mode()` | `Wakeup` / `Sleep` / `DeepSleep`. |
-| `set_vhv_repeat_count(u32)`       | Temperature recalibration interval. |
-
-### Ranging loop
-
-| Method                            | Description |
-| --------------------------------- | ----------- |
-| `start_ranging()` / `stop_ranging()` | Begin / end measurement session. |
-| `check_data_ready()`              | Poll-based ready flag (true when a new frame is queued). |
-| `wait_for_data_ready_blocking()`  | Tight-poll the interrupt pin (blocking driver, requires INT). |
-| `wait_for_data_ready().await`     | Async equivalent (async driver, requires `Wait`-implementing INT). |
-| `get_ranging_data()`              | Read the latest `ResultsData` block. |
-
-The optional `motion`, `thresholds`, and `xtalk` features each unlock an
-additional set of methods — see the relevant `examples/` files in
-`vl53l8cx-uld/`.
+| `raw-format`   | Return the sensor's fixed-point units instead of mm / kcps / %. |
+| `disable-*`    | Drop optional output fields to shrink `ResultsData` at build time. |
+| `targets-2..4` | Targets per zone (`vl53-8x8`; experimental, untested on hardware). |
+| `defmt`        | Bus trace logging through `defmt`.                              |
 
 ## Architecture
 
-`vl53l8cx-uld` is a **Foreign Function Interface (FFI) wrapper** around
-the official STMicroelectronics Ultra Lite Driver (ULD): the ranging
-algorithms, register-level state machines, and firmware blob all come
-from ST's own C code, statically compiled into the `vl53l8cx-uld-sys` crate.
-
-`vl53-8x8` is an independent pure-Rust port of the I/O paths, with
-no C runtime calls — it shares only types and the firmware blob from
-`vl53l8cx-uld-sys`.
-
 ```mermaid
 graph TD;
-    subgraph "Your application"
-        UserApp[Application code]
+    UserApp[Application code]
+
+    subgraph "vl53-8x8 (async, pure Rust)"
+        AsyncApi["Sensor&lt;Bus, Delay, ...&gt;<br/>detect variant, patch + upload firmware"]
+        Tables["ST firmware image + data tables<br/>(generated from the ULD headers)"]
     end
 
     subgraph "vl53l8cx-uld (blocking)"
-        BlockingApi["Safe blocking API<br/>(Vl53l8cx&lt;Bus, Delay, ...&gt;)"]
-        PlatformShim[Platform shim<br/>FFI callbacks]
-    end
-
-    subgraph "vl53-8x8"
-        AsyncApi["Safe async API<br/>(pure Rust, no C calls)"]
+        BlockingApi["Vl53l8cx&lt;Bus, Delay, ...&gt;"]
+        PlatformShim["Platform shim<br/>bind_platform_driver!"]
     end
 
     subgraph "vl53l8cx-uld-sys"
-        SafeWrappers[Safe wrappers]
-        UnsafeBindings[Unsafe bindings<br/>bindgen]
-        ULD[ST ULD C-code<br/>statically compiled]
-        FirmwareBlob[Firmware blob<br/>~86 KB]
+        Bindings["bindgen bindings + safe wrappers"]
+        ULD["ST ULD C code + firmware<br/>(cc, needs libclang)"]
     end
 
-    UserApp --> BlockingApi
+    Types["vl53-8x8-types<br/>Error, Resolution, plugin types"]
+
     UserApp --> AsyncApi
-    BlockingApi --> SafeWrappers
-    SafeWrappers --> UnsafeBindings
-    UnsafeBindings --> ULD
-    ULD -- "I/O + delay" --> PlatformShim
-    AsyncApi --> FirmwareBlob
-    AsyncApi -- "I/O + delay" --> HAL["embedded-hal traits<br/>(I2c / SpiDevice / DelayNs / ...)"]
-    PlatformShim --> HAL
-    HAL --> Hardware[VL53L8CX]
+    UserApp --> BlockingApi
+    AsyncApi --> Tables
+    AsyncApi --> Types
+    BlockingApi --> Bindings --> ULD
+    ULD -- "I/O + delay callbacks" --> PlatformShim
+    Bindings --> Types
+    AsyncApi -- "embedded-hal-async" --> HAL["embedded-hal traits<br/>I2c / SpiDevice / DelayNs / Wait"]
+    PlatformShim -- "embedded-hal" --> HAL
+    HAL --> Hardware["VL53L5CX / VL53L8CX"]
+    Bindings -. "dev-dependency: test oracle" .-> AsyncApi
 ```
 
-### Key concepts
-
-* **Platform-agnostic via embedded-hal.** Both crates take any type
-  implementing the relevant `embedded-hal` 1.0 trait — `I2c`,
-  `SpiDevice`, `OutputPin`, `InputPin`, `DelayNs`. The blocking driver
-  exposes its FFI callbacks through the `bind_platform_driver!` /
-  `bind_platform_driver_spi!` macros, which the demo crates invoke once
-  per binary.
-* **Static linking.** `vl53l8cx-uld-sys` builds the ST ULD with `cc` and
-  generates Rust bindings with `bindgen`; the firmware blob is a static
-  byte array linked into the final binary.
+* **Platform-agnostic via embedded-hal.** Both drivers take any type
+  implementing the relevant `embedded-hal` 1.0 trait. The blocking driver
+  reaches the bus from C through the `bind_platform_driver!` /
+  `bind_platform_driver_spi!` macros, invoked once per binary.
+* **libclang is only needed for the ULD crates.** `vl53l8cx-uld-sys` runs
+  `bindgen` at build time (set `LIBCLANG_PATH` if it is not found). `vl53-8x8`
+  has no build script and no C; it uses `vl53l8cx-uld-sys` only as a
+  dev-dependency, so its oracle tests (`cargo test -p vl53-8x8`) need
+  libclang but downstream builds do not.
+* **One firmware, two parts.** `vl53-8x8` ships ST's VL53L8CX firmware image
+  and tables (`tools/extract_uld_blobs.py` regenerates them from the ULD
+  headers) and patches the handful of bytes that differ for the VL53L5CX at
+  upload time, after reading the chip's revision ID.
 
 ## Development
 
-This workspace uses a Nix flake to pin the Rust toolchain, the
-ARM-bare-metal cross-toolchain (`gcc-arm-embedded`), the Pi cross
-toolchains (`pkgsCross.aarch64-multiplatform{,-musl}`,
-`pkgsCross.armv7l-hf-multiplatform`), and `probe-rs-tools` /
-`cargo-binutils` for flashing the Nucleo board.
+This workspace uses a Nix flake to pin the Rust toolchain, libclang, the
+ARM bare-metal cross toolchain (`gcc-arm-embedded`), the Pi cross toolchains
+(`pkgsCross.aarch64-multiplatform{,-musl}`, `pkgsCross.armv7l-hf-multiplatform`),
+and `probe-rs-tools` / `cargo-binutils` for flashing the STM32 boards.
 
 ```bash
-nix develop                       # drop into the dev shell
-cargo build --workspace           # build the three driver crates
-cd nucleo-f401re && cargo run     # flash + run on a connected Nucleo
+nix develop                            # drop into the dev shell
+cargo build --workspace                # build the four library crates
+cargo test --workspace                 # host tests incl. vl53-8x8's C-oracle tests
+cd nucleo-f401re && cargo run          # flash + run on a connected Nucleo (probe-rs)
+cd nucleo-f401re-async && cargo test --release --features spi-bus   # on-target tests
 cd rpi-zero-2w && cargo build --target aarch64-unknown-linux-musl --bins
 ```
 
@@ -222,13 +198,15 @@ it natively.
 This workspace is licensed under the **BSD 3-Clause License** — see
 [`LICENSE`](LICENSE).
 
-The C source under [`vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`](./vl53l8cx-uld-sys/src/VL53L8CX_ULD_API)
-is the official **STMicroelectronics VL53L8CX Ultra Lite Driver**,
-distributed by ST under the BSD 3-Clause License (see the per-file
-copyright headers and `LICENSE.txt` in ST's
+The C source under [`vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`](./vl53l8cx-uld-sys/src/VL53L8CX_ULD_API),
+and the firmware image and data tables shipped in `vl53-8x8`, are the
+official **STMicroelectronics VL53L8CX Ultra Lite Driver**, distributed by
+ST under the BSD 3-Clause License (see
+[`LICENSE-ST`](./vl53l8cx-uld-sys/LICENSE-ST), the per-file copyright
+headers and `LICENSE.txt` in ST's
 [STSW-IMG040](https://www.st.com/en/embedded-software/stsw-img040.html)
-package). It is included verbatim apart from line-ending normalisation
-and a single missing-semicolon fix in `vl53l8cx_api.c`.
+package). The C code is included verbatim apart from line-ending
+normalisation and a single missing-semicolon fix in `vl53l8cx_api.c`.
 
 The Rust portions originate from Scott Wakefield's earlier
 `vl53l5cx-driver` / `vl53l8cx-driver` work and are included here under
