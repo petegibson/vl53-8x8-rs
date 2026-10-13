@@ -107,6 +107,8 @@ Verified with this crate layout, via the demo crates' on-target test suites:
   (`nucleo-f401re-async`).
 * STM32F412RE custom board (VL53L8CX) over async DMA I2C, including the
   firmware upload path (`evo-f412re-async`).
+* Raspberry Pi Zero 2W (Linux, `linux-embedded-hal`) with a Pololu VL53L8CX
+  breakout over `/dev/spidev0.0`, Tokio current-thread (`rpi-zero-2w`).
 
 VL53L5CX support is implemented and was validated on hardware before this
 crate layout; re-verification with the current layout is pending.
