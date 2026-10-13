@@ -134,7 +134,7 @@ impl embedded_hal_async::delay::DelayNs for TokioDelay {
 // --- Blocking → async SpiDevice adapter ---
 //
 // `linux-embedded-hal`'s `SpidevDevice` only implements the blocking SPI
-// traits. `vl53l8cx-async::Vl53l8cxSpiDevice<T>` needs `T:
+// traits. `vl53_8x8::Spi<T>` needs `T:
 // embedded_hal_async::spi::SpiDevice`. This wrapper bridges the two by
 // invoking the blocking transaction inside an `async fn`. I/O blocks the
 // current task; pair it with a single-threaded Tokio runtime

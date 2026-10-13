@@ -10,7 +10,7 @@ fn trace_data(data: &[u8]) {
     }
 }
 
-/// Async bus abstraction for VL53L8CX communication.
+/// Async bus abstraction for talking to a VL53L5CX/VL53L8CX sensor.
 pub trait VlBusAsync {
     type Error: core::fmt::Debug;
 
@@ -83,7 +83,7 @@ impl<T: I2c> VlBusAsync for T {
 /// trait, so you can wrap it directly:
 /// ```ignore
 /// let i2c = embassy_stm32::i2c::I2c::new(/* async params */);
-/// let sensor = Vl53l8cx::new(BlockingI2c(i2c), Delay);
+/// let sensor = Sensor::new(BlockingI2c(i2c), Delay);
 /// ```
 pub struct BlockingI2c<T>(pub T);
 
@@ -130,12 +130,12 @@ impl<T: embedded_hal::i2c::I2c> VlBusAsync for BlockingI2c<T> {
     }
 }
 
-/// Wrapper around an async `SpiDevice` for VL53L8CX communication.
-pub struct Vl53l8cxSpiDevice<SPI> {
+/// Wrapper around an async `SpiDevice` implementing the sensor's SPI register protocol.
+pub struct Spi<SPI> {
     pub spi: SPI,
 }
 
-impl<SPI: SpiDevice> VlBusAsync for Vl53l8cxSpiDevice<SPI> {
+impl<SPI: SpiDevice> VlBusAsync for Spi<SPI> {
     type Error = <SPI as embedded_hal::spi::ErrorType>::Error;
 
     async fn write(&mut self, _addr: SevenBitAddress, reg: u16, data: &[u8]) -> Result<(), Self::Error> {

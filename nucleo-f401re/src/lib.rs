@@ -1,7 +1,7 @@
 #![no_std]
 
 use stm32f4xx_hal::{pac, prelude::*};
-use vl53l8cx_driver::Vl53l8cx;
+use vl53l8cx_uld::Vl53l8cx;
 
 pub type SensorDelay = stm32f4xx_hal::timer::SysDelay;
 
@@ -11,7 +11,7 @@ pub type SensorDelay = stm32f4xx_hal::timer::SysDelay;
 pub type SensorI2c = stm32f4xx_hal::i2c::I2c<pac::I2C1>;
 
 #[cfg(not(feature = "spi-bus"))]
-vl53l8cx_driver::bind_platform_driver!(SensorI2c, SensorDelay);
+vl53l8cx_uld::bind_platform_driver!(SensorI2c, SensorDelay);
 
 #[cfg(not(feature = "spi-bus"))]
 pub type Sensor = Vl53l8cx<
@@ -26,7 +26,7 @@ pub type Sensor = Vl53l8cx<
 #[cfg(feature = "spi-bus")]
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 #[cfg(feature = "spi-bus")]
-use vl53l8cx_driver::Vl53l8cxSpiDevice;
+use vl53l8cx_uld::Vl53l8cxSpiDevice;
 
 #[cfg(feature = "spi-bus")]
 pub type SensorSpi = ExclusiveDevice<
@@ -36,7 +36,7 @@ pub type SensorSpi = ExclusiveDevice<
 >;
 
 #[cfg(feature = "spi-bus")]
-vl53l8cx_driver::bind_platform_driver_spi!(SensorSpi, SensorDelay);
+vl53l8cx_uld::bind_platform_driver_spi!(SensorSpi, SensorDelay);
 
 #[cfg(feature = "spi-bus")]
 pub type Sensor = Vl53l8cx<

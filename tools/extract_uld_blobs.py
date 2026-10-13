@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Regenerate the ST ULD data tables compiled into `vl53l8cx-async`.
+"""Regenerate the ST ULD data tables compiled into `vl53-8x8`.
 
-Parses `vl53l8cx-sys/src/VL53L8CX_ULD_API/inc/vl53l8cx_buffers.h` (ST's
+Parses `vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/inc/vl53l8cx_buffers.h` (ST's
 Ultra Lite Driver) and writes:
 
-  vl53l8cx-async/src/uld_data.rs          DEFAULT_CONFIGURATION, DEFAULT_XTALK,
+  vl53-8x8/src/uld_data.rs          DEFAULT_CONFIGURATION, DEFAULT_XTALK,
                                           GET_NVM_CMD as Rust `const` arrays
-  vl53l8cx-async/src/vl53l8cx_fw_base.bin VL53L8CX_FIRMWARE as raw bytes
+  vl53-8x8/src/vl53l8cx_fw_base.bin VL53L8CX_FIRMWARE as raw bytes
 
 Regeneration procedure after dropping a new ULD release into the sys crate:
 
     python3 tools/extract_uld_blobs.py        # rewrite both outputs
-    cargo test -p vl53l8cx-async              # oracle tests against the C arrays
-    git diff vl53l8cx-async/src/uld_data.rs   # review the table changes
+    cargo test -p vl53-8x8              # oracle tests against the C arrays
+    git diff vl53-8x8/src/uld_data.rs   # review the table changes
 
 `--check` verifies the files on disk without writing (exit 1 on mismatch).
 Python 3 standard library only.
@@ -29,9 +29,9 @@ import re
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-DEFAULT_HEADER = REPO_ROOT / "vl53l8cx-sys/src/VL53L8CX_ULD_API/inc/vl53l8cx_buffers.h"
+DEFAULT_HEADER = REPO_ROOT / "vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/inc/vl53l8cx_buffers.h"
 DEFAULT_API_HEADER = DEFAULT_HEADER.with_name("vl53l8cx_api.h")
-DEFAULT_OUT_DIR = REPO_ROOT / "vl53l8cx-async/src"
+DEFAULT_OUT_DIR = REPO_ROOT / "vl53-8x8/src"
 
 # Preprocessor symbols that may appear inside the arrays, with the value they
 # take in the build the sys crate performs (VL53L8CX_NB_TARGET_PER_ZONE == 1).
@@ -96,7 +96,7 @@ def render_rust(arrays, header_rel, revision):
     out.append("//! the NVM-read command), transcribed byte-for-byte from `vl53l8cx_buffers.h`.")
     out.append("//! The firmware image from the same header is shipped separately as")
     out.append("//! `vl53l8cx_fw_base.bin`. Both are checked against the C arrays compiled")
-    out.append("//! into `vl53l8cx-sys` by this crate's oracle tests.")
+    out.append("//! into `vl53l8cx-uld-sys` by this crate's oracle tests.")
     out.append("")
     for c_name, rust_name in RUST_TABLES:
         if c_name not in arrays:

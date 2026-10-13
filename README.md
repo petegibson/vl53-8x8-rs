@@ -10,9 +10,9 @@ The workspace contains two driver crates plus three example/demo crates:
 
 | Crate                    | Role                                                                 |
 | ------------------------ | -------------------------------------------------------------------- |
-| `vl53l8cx-sys`           | Low-level FFI bindings + statically-linked ST ULD C source.          |
-| `vl53l8cx-driver`        | Safe blocking API on top of the C ULD; uses `embedded-hal` 1.0.      |
-| `vl53l8cx-async`         | Pure-Rust async port (no C runtime); uses `embedded-hal-async` 1.0.  |
+| `vl53l8cx-uld-sys`           | Low-level FFI bindings + statically-linked ST ULD C source.          |
+| `vl53l8cx-uld`        | Safe blocking API on top of the C ULD; uses `embedded-hal` 1.0.      |
+| `vl53-8x8`         | Pure-Rust async port (no C runtime); uses `embedded-hal-async` 1.0.  |
 | `nucleo-f401re/`         | Bare-metal blocking demo on STM32F401RE Nucleo, I²C or SPI bus.      |
 | `nucleo-f401re-async/`   | Bare-metal async (Embassy) demo on STM32F401RE, I²C or SPI bus.      |
 | `rpi-zero-2w/`           | Linux demo on a Raspberry Pi Zero 2W, SPI via `linux-embedded-hal`.  |
@@ -42,7 +42,7 @@ a reset pin (LPn) and interrupt pin (data ready), then `init()` uploads the
 firmware. Either `new` (I²C) or `new_spi` (SPI) gives a typed handle:
 
 ```rust
-use vl53l8cx_driver::{Vl53l8cx, Resolution};
+use vl53l8cx_uld::{Vl53l8cx, Resolution};
 
 // I²C
 let mut sensor = Vl53l8cx::new(i2c, delay)
@@ -69,7 +69,7 @@ loop {
 }
 ```
 
-The async crate (`vl53l8cx-async`) has the same shape with `.await` on
+The async crate (`vl53-8x8`) has the same shape with `.await` on
 each call.
 
 For runnable end-to-end examples see the demo crates listed above; each
@@ -77,7 +77,7 @@ has its own README covering wiring, host setup, and build/run steps.
 
 ## Cargo features
 
-Both `vl53l8cx-driver` and `vl53l8cx-async` accept the same feature flags
+Both `vl53l8cx-uld` and `vl53-8x8` accept the same feature flags
 to opt in to ULD plugins or out of unused result fields, trading flash
 and RAM:
 
@@ -93,7 +93,7 @@ and RAM:
 ## API reference (selected)
 
 All driver methods return `Result<T, Error<BusError>>`. The full set lives
-in [`vl53l8cx-driver/src/lib.rs`](./vl53l8cx-driver/src/lib.rs) — a
+in [`vl53l8cx-uld/src/lib.rs`](./vl53l8cx-uld/src/lib.rs) — a
 condensed view of the most-used calls:
 
 ### Construction & control
@@ -134,18 +134,18 @@ condensed view of the most-used calls:
 
 The optional `motion`, `thresholds`, and `xtalk` features each unlock an
 additional set of methods — see the relevant `examples/` files in
-`vl53l8cx-driver/`.
+`vl53l8cx-uld/`.
 
 ## Architecture
 
-`vl53l8cx-driver` is a **Foreign Function Interface (FFI) wrapper** around
+`vl53l8cx-uld` is a **Foreign Function Interface (FFI) wrapper** around
 the official STMicroelectronics Ultra Lite Driver (ULD): the ranging
 algorithms, register-level state machines, and firmware blob all come
-from ST's own C code, statically compiled into the `vl53l8cx-sys` crate.
+from ST's own C code, statically compiled into the `vl53l8cx-uld-sys` crate.
 
-`vl53l8cx-async` is an independent pure-Rust port of the I/O paths, with
+`vl53-8x8` is an independent pure-Rust port of the I/O paths, with
 no C runtime calls — it shares only types and the firmware blob from
-`vl53l8cx-sys`.
+`vl53l8cx-uld-sys`.
 
 ```mermaid
 graph TD;
@@ -153,16 +153,16 @@ graph TD;
         UserApp[Application code]
     end
 
-    subgraph "vl53l8cx-driver (blocking)"
+    subgraph "vl53l8cx-uld (blocking)"
         BlockingApi["Safe blocking API<br/>(Vl53l8cx&lt;Bus, Delay, ...&gt;)"]
         PlatformShim[Platform shim<br/>FFI callbacks]
     end
 
-    subgraph "vl53l8cx-async"
+    subgraph "vl53-8x8"
         AsyncApi["Safe async API<br/>(pure Rust, no C calls)"]
     end
 
-    subgraph "vl53l8cx-sys"
+    subgraph "vl53l8cx-uld-sys"
         SafeWrappers[Safe wrappers]
         UnsafeBindings[Unsafe bindings<br/>bindgen]
         ULD[ST ULD C-code<br/>statically compiled]
@@ -189,7 +189,7 @@ graph TD;
   exposes its FFI callbacks through the `bind_platform_driver!` /
   `bind_platform_driver_spi!` macros, which the demo crates invoke once
   per binary.
-* **Static linking.** `vl53l8cx-sys` builds the ST ULD with `cc` and
+* **Static linking.** `vl53l8cx-uld-sys` builds the ST ULD with `cc` and
   generates Rust bindings with `bindgen`; the firmware blob is a static
   byte array linked into the final binary.
 
@@ -222,7 +222,7 @@ it natively.
 This workspace is licensed under the **BSD 3-Clause License** — see
 [`LICENSE`](LICENSE).
 
-The C source under [`vl53l8cx-sys/src/VL53L8CX_ULD_API/`](./vl53l8cx-sys/src/VL53L8CX_ULD_API)
+The C source under [`vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`](./vl53l8cx-uld-sys/src/VL53L8CX_ULD_API)
 is the official **STMicroelectronics VL53L8CX Ultra Lite Driver**,
 distributed by ST under the BSD 3-Clause License (see the per-file
 copyright headers and `LICENSE.txt` in ST's

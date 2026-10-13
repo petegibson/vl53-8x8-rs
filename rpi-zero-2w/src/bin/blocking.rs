@@ -11,10 +11,10 @@ use rpi_zero_2w::{
     firmware_upload_secs, format_freq, open_lpn, open_spi, print_distance_grid, LpnPin, SensorSpi,
     StdDelay, FIRMWARE_SIZE_KB, LPN_GPIO, SPI_DEVICE, SPI_FREQ_HZ, SPI_MODE_LABEL,
 };
-use vl53l8cx_driver::{Resolution, Vl53l8cx};
+use vl53l8cx_uld::{Resolution, Vl53l8cx};
 
 // Generate the ST-ULD platform callbacks bound to our chosen bus + delay type.
-vl53l8cx_driver::bind_platform_driver_spi!(SensorSpi, StdDelay);
+vl53l8cx_uld::bind_platform_driver_spi!(SensorSpi, StdDelay);
 
 const RESOLUTION: Resolution = Resolution::Res4x4;
 const RANGING_FREQ_HZ: u8 = 10;

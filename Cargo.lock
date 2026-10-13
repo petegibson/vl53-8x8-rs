@@ -12,12 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.102"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
-
-[[package]]
 name = "bindgen"
 version = "0.69.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -397,32 +391,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
-name = "vl53-8x8-types"
-version = "0.1.0"
-
-[[package]]
-name = "vl53l8cx-async"
+name = "vl53-8x8"
 version = "0.1.0"
 dependencies = [
  "defmt",
  "embedded-hal",
  "embedded-hal-async",
  "vl53-8x8-types",
- "vl53l8cx-sys",
+ "vl53l8cx-uld-sys",
 ]
 
 [[package]]
-name = "vl53l8cx-driver"
+name = "vl53-8x8-types"
+version = "0.1.0"
+
+[[package]]
+name = "vl53l8cx-uld"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "defmt",
  "embedded-hal",
- "vl53l8cx-sys",
+ "vl53l8cx-uld-sys",
 ]
 
 [[package]]
-name = "vl53l8cx-sys"
+name = "vl53l8cx-uld-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",

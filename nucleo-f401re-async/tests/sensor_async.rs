@@ -5,7 +5,7 @@ use defmt_rtt as _;
 
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_time::Delay;
-use vl53l8cx_async::{PowerMode, RangingMode, Resolution, TargetOrder, Vl53l8cx};
+use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder};
 
 // --- I2C mode (default) ---
 
@@ -22,15 +22,15 @@ mod bus_setup {
     type I2cInst = i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>;
 
     #[cfg(feature = "blocking-i2c")]
-    pub type Sensor = Vl53l8cx<
-        vl53l8cx_async::BlockingI2c<I2cInst>,
+    pub type Sensor = vl53_8x8::Sensor<
+        vl53_8x8::BlockingI2c<I2cInst>,
         Delay,
         Output<'static>,
         embassy_stm32::gpio::Input<'static>,
     >;
 
     #[cfg(not(feature = "blocking-i2c"))]
-    pub type Sensor = Vl53l8cx<
+    pub type Sensor = vl53_8x8::Sensor<
         I2cInst,
         Delay,
         Output<'static>,
@@ -75,9 +75,9 @@ mod bus_setup {
         cortex_m::asm::delay(84_000 * 100);
 
         #[cfg(feature = "blocking-i2c")]
-        let sensor = Vl53l8cx::new(vl53l8cx_async::BlockingI2c(i2c), Delay);
+        let sensor = vl53_8x8::Sensor::new(vl53_8x8::BlockingI2c(i2c), Delay);
         #[cfg(not(feature = "blocking-i2c"))]
-        let sensor = Vl53l8cx::new(i2c, Delay);
+        let sensor = vl53_8x8::Sensor::new(i2c, Delay);
 
         sensor
             .with_reset_pin_active_low(lp_c)
@@ -92,7 +92,6 @@ mod bus_setup {
     use super::*;
     use embassy_stm32::spi;
     use embedded_hal_bus::spi::ExclusiveDevice;
-    use vl53l8cx_async::Vl53l8cxSpiDevice;
 
     type SpiDev = ExclusiveDevice<
         spi::Spi<'static, embassy_stm32::mode::Async, embassy_stm32::spi::mode::Master>,
@@ -100,8 +99,8 @@ mod bus_setup {
         embedded_hal_bus::spi::NoDelay,
     >;
 
-    pub type Sensor = Vl53l8cx<
-        Vl53l8cxSpiDevice<SpiDev>,
+    pub type Sensor = vl53_8x8::Sensor<
+        vl53_8x8::Spi<SpiDev>,
         Delay,
         Output<'static>,
         embassy_stm32::gpio::Input<'static>,
@@ -149,7 +148,7 @@ mod bus_setup {
         lp_c.set_high();
         cortex_m::asm::delay(84_000 * 100);
 
-        Vl53l8cx::new_spi(spi_device, Delay)
+        vl53_8x8::Sensor::new_spi(spi_device, Delay)
             .with_reset_pin_active_low(lp_c)
             .with_interrupt_pin_active_low(int_c)
     }

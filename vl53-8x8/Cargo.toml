@@ -1,5 +1,5 @@
 [package]
-name = "vl53l8cx-async"
+name = "vl53-8x8"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
@@ -16,7 +16,7 @@ defmt = { version = "1", optional = true }
 # Oracle for the tests only: the C ULD as compiled by bindgen/cc. Never linked
 # into the driver, so downstream builds need no libclang. Built with its default
 # features; layout tests therefore run only under this crate's default features.
-vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
+vl53l8cx-uld-sys = { path = "../vl53l8cx-uld-sys", version = "0.1.0" }
 
 [features]
 default = []

@@ -3,7 +3,7 @@
 //! [`ResultsData`] is a field-for-field Rust rendering of the ULD's
 //! `VL53L8CX_ResultsData` (`vl53l8cx_api.h`). It is `#[repr(C)]` and gated by
 //! the same build options, so under a given feature set it has the same size
-//! and field offsets as the C struct compiled into `vl53l8cx-sys`; the oracle
+//! and field offsets as the C struct compiled into `vl53l8cx-uld-sys`; the oracle
 //! tests check this for the default feature set.
 //!
 //! Feature mapping (ULD macro -> crate feature):

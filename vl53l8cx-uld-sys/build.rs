@@ -185,7 +185,7 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
         .define("VL53L8CX_NB_TARGET_PER_ZONE", nb_targets)
         // This tells the C driver to use the high-level platform functions.
         .define("USE_ULP_PLATFORM", "1")
-        .compile("vl53l8cx_driver");
+        .compile("vl53l8cx_uld");
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/VL53L8CX_ULD_API/inc/vl53l8cx_api.h");

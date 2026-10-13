@@ -1,12 +1,12 @@
 // GENERATED FILE - DO NOT EDIT.
-// Source: vl53l8cx-sys/src/VL53L8CX_ULD_API/inc/vl53l8cx_buffers.h (ULD VL53L8CX_2.0.0).
+// Source: vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/inc/vl53l8cx_buffers.h (ULD VL53L8CX_2.0.0).
 // Regenerate with: python3 tools/extract_uld_blobs.py
 
 //! ST ULD data tables (default configuration, default crosstalk shape and
 //! the NVM-read command), transcribed byte-for-byte from `vl53l8cx_buffers.h`.
 //! The firmware image from the same header is shipped separately as
 //! `vl53l8cx_fw_base.bin`. Both are checked against the C arrays compiled
-//! into `vl53l8cx-sys` by this crate's oracle tests.
+//! into `vl53l8cx-uld-sys` by this crate's oracle tests.
 
 /// C `VL53L8CX_DEFAULT_CONFIGURATION` (972 bytes).
 ///

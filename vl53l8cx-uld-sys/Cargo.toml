@@ -1,5 +1,5 @@
 [package]
-name = "vl53l8cx-sys"
+name = "vl53l8cx-uld-sys"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"

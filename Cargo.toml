@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "vl53-8x8-types",
-    "vl53l8cx-sys",
-    "vl53l8cx-driver",
-    "vl53l8cx-async",
+    "vl53l8cx-uld-sys",
+    "vl53l8cx-uld",
+    "vl53-8x8",
 ]
 exclude = [
     "nucleo-f401re",

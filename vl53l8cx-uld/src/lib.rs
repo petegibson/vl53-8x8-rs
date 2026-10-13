@@ -1,9 +1,18 @@
 #![no_std]
 /*!
-A platform-agnostic driver for the VL53L8CX Time-of-Flight sensor.
+`vl53l8cx-uld`: a safe, blocking, platform-agnostic wrapper over the official
+STMicroelectronics VL53L8CX ULD (Ultra Lite Driver).
 
-This driver is built on top of the `embedded-hal` traits and uses the official
-ST Microelectronics VL53L8CX ULD (Ultra Lite Driver) via the `vl53l8cx-sys` crate.
+The C ULD is compiled and bound by the `vl53l8cx-uld-sys` crate (bindgen + cc,
+so libclang is needed at build time); this crate exposes it through
+`embedded-hal` 1.0 I2C/SPI and delay traits. The ULD calls back into Rust for
+bus access, so a program must invoke [`bind_platform_driver!`] or
+[`bind_platform_driver_spi!`] exactly once with its concrete bus and delay
+types.
+
+For a pure-Rust driver covering both the VL53L5CX and VL53L8CX with no C
+toolchain requirement, see the `vl53-8x8` crate. Shared types come from
+`vl53-8x8-types` and are re-exported here.
 */
 
 use embedded_hal::delay::DelayNs;
@@ -12,7 +21,7 @@ use embedded_hal::i2c::{I2c, SevenBitAddress};
 use embedded_hal::spi::SpiDevice;
 
 // We import the sys crate internally but do NOT make it public.
-use vl53l8cx_sys as sys;
+use vl53l8cx_uld_sys as sys;
 
 // --- Public Type Re-exports from sys ---
 pub use sys::VL53L8CX_Platform;

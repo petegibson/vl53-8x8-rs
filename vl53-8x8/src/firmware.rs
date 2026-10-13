@@ -148,8 +148,8 @@ mod tests {
 
     #[test]
     fn base_image_matches_uld_l8_firmware() {
-        // Oracle: the C ULD firmware array compiled into vl53l8cx-sys.
-        let oracle = unsafe { &vl53l8cx_sys::VL53L8CX_FIRMWARE };
+        // Oracle: the C ULD firmware array compiled into vl53l8cx-uld-sys.
+        let oracle = unsafe { &vl53l8cx_uld_sys::VL53L8CX_FIRMWARE };
         assert_eq!(BASE_FIRMWARE.len(), FIRMWARE_LEN);
         assert_eq!(BASE_FIRMWARE, &oracle[..]);
     }

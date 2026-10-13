@@ -1,6 +1,6 @@
 //! Oracle tests: check the hand-transcribed constants, generated data tables
 //! and `#[repr(C)]` result/state layouts against the ST ULD as compiled by
-//! `vl53l8cx-sys` (a dev-dependency only; the driver itself never links it).
+//! `vl53l8cx-uld-sys` (a dev-dependency only; the driver itself never links it).
 //!
 //! The dev-dependency is built with its default features, so the tests that
 //! depend on feature-sensitive layout (`ResultsData`, `temp_buffer`) only run
@@ -9,7 +9,7 @@
 
 use crate::consts;
 use crate::uld_data;
-use vl53l8cx_sys as sys;
+use vl53l8cx_uld_sys as sys;
 
 // --- Data tables -------------------------------------------------------------
 

@@ -4,7 +4,7 @@
 //! `SpidevDevice` only implements the *blocking* `embedded-hal` SPI traits
 //! (no `embedded-hal-async` impl exists upstream), so we wrap it in the
 //! `BlockingSpi` adapter from `lib.rs` to satisfy the async `SpiDevice`
-//! trait that `vl53l8cx-async` requires. Each transfer therefore **blocks
+//! trait that `vl53-8x8` requires. Each transfer therefore **blocks
 //! the Tokio task** for its duration. Only the driver's internal
 //! `DelayNs` calls actually yield to the runtime.
 //!
@@ -21,7 +21,7 @@ use rpi_zero_2w::{
     firmware_upload_secs, format_freq, open_lpn, open_spi, print_distance_grid, BlockingSpi,
     TokioDelay, FIRMWARE_SIZE_KB, LPN_GPIO, SPI_DEVICE, SPI_FREQ_HZ, SPI_MODE_LABEL,
 };
-use vl53l8cx_async::{Resolution, Vl53l8cx};
+use vl53_8x8::{Resolution, Sensor};
 
 const RESOLUTION: Resolution = Resolution::Res4x4;
 const RANGING_FREQ_HZ: u8 = 10;
@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     log::info!("Acquiring LPn on BCM GPIO{LPN_GPIO}...");
     let lpn = open_lpn().context("open LPn — is the user in the gpio group, or run with sudo?")?;
 
-    let mut sensor = Vl53l8cx::new_spi(BlockingSpi(spi), TokioDelay).with_reset_pin_active_low(lpn);
+    let mut sensor = Sensor::new_spi(BlockingSpi(spi), TokioDelay).with_reset_pin_active_low(lpn);
 
     sensor.reset().await.context("sensor reset (LPn toggle)")?;
     tokio::time::sleep(Duration::from_millis(10)).await;

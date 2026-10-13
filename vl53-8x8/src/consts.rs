@@ -1,7 +1,7 @@
 //! Protocol constants transcribed from the ST VL53L8CX Ultra Lite Driver.
 //!
 //! Reference: ULD `VL53L8CX_2.0.0` (`VL53L8CX_API_REVISION`), headers under
-//! `vl53l8cx-sys/src/VL53L8CX_ULD_API/inc/`:
+//! `vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/inc/`:
 //!
 //! - `vl53l8cx_api.h`: UI command registers, buffer sizes, DCI indices,
 //!   result block-header indices, `VL53L8CX_TEMPORARY_BUFFER_SIZE` formula.
@@ -11,7 +11,7 @@
 //!
 //! The ULD spells these as macros with explicit casts (`((uint16_t)0x5450U)`),
 //! which bindgen does not emit, so they are written out by hand. Every value is
-//! checked against the `vl53l8cx-sys` crate by the oracle tests in
+//! checked against the `vl53l8cx-uld-sys` crate by the oracle tests in
 //! `oracle_tests.rs`. Names keep the C spelling so the two can be diffed
 //! by eye; status codes, resolution and target-order values live in
 //! `vl53-8x8-types`.

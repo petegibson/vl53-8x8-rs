@@ -7,7 +7,7 @@ use panic_probe as _;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_time::Delay;
-use vl53l8cx_async::{Resolution, Vl53l8cx};
+use vl53_8x8::{Resolution, Sensor};
 
 // --- Configuration ---
 const RESOLUTION: Resolution = Resolution::Res4x4;
@@ -75,7 +75,7 @@ async fn main(_spawner: Spawner) {
             i2c_config,
         );
 
-        Vl53l8cx::new(vl53l8cx_async::BlockingI2c(i2c), Delay)
+        Sensor::new(vl53_8x8::BlockingI2c(i2c), Delay)
             .with_reset_pin_active_low(lp_c)
     };
 
@@ -94,7 +94,7 @@ async fn main(_spawner: Spawner) {
             i2c_config,
         );
 
-        Vl53l8cx::new(i2c, Delay)
+        Sensor::new(i2c, Delay)
             .with_reset_pin_active_low(lp_c)
     };
 
@@ -126,7 +126,7 @@ async fn main(_spawner: Spawner) {
         let cs = Output::new(p.PB6, Level::High, Speed::VeryHigh);
         let spi_device = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
 
-        Vl53l8cx::new_spi(spi_device, Delay)
+        Sensor::new_spi(spi_device, Delay)
             .with_reset_pin_active_low(lp_c)
     };
 

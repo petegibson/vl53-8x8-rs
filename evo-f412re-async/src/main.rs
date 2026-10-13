@@ -45,8 +45,8 @@ use embassy_stm32::{bind_interrupts, dma, i2c, peripherals};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Timer};
-use vl53l8cx_async::{
-    Error, FirmwareError, ResultsData, Resolution, SevenBitAddress, Vl53l8cx, DEFAULT_ADDRESS,
+use vl53_8x8::{
+    Error, FirmwareError, ResultsData, Resolution, SevenBitAddress, DEFAULT_ADDRESS,
 };
 
 // --- Configuration ---
@@ -68,7 +68,7 @@ const MAX_TRANSIENT_ERRORS: u8 = 5;
 // each `I2cDevice` locks the bus only for the duration of a single transfer.
 type SharedI2c = Mutex<NoopRawMutex, I2c<'static, Async, Master>>;
 type SensorBus<'a> = I2cDevice<'a, NoopRawMutex, I2c<'static, Async, Master>>;
-type Sensor<'a> = Vl53l8cx<SensorBus<'a>, Delay>;
+type Sensor<'a> = vl53_8x8::Sensor<SensorBus<'a>, Delay>;
 type SensorError = Error<I2cDeviceError<embassy_stm32::i2c::Error>>;
 
 // I2C1 + DMA interrupt bindings (embassy 0.6 routes DMA completion through
@@ -175,7 +175,7 @@ async fn run_session(
 ) -> Result<(), SensorError> {
     // --- Sensor 1: the always-on sensor, currently at the default address ---
     defmt::info!("Bringing up sensor 1 (default address {:#04x})...", DEFAULT_ADDRESS);
-    let mut s1 = Vl53l8cx::new(I2cDevice::new(bus), Delay);
+    let mut s1 = vl53_8x8::Sensor::new(I2cDevice::new(bus), Delay);
     init_blinking(&mut s1, led).await?;
     defmt::info!("Sensor 1 variant: {}", Debug2Format(&s1.variant()));
 
@@ -187,7 +187,7 @@ async fn run_session(
     tof_lp.set_high();
     Timer::after_millis(10).await;
     defmt::info!("Bringing up sensor 2 (default address {:#04x})...", DEFAULT_ADDRESS);
-    let mut s2 = Vl53l8cx::new(I2cDevice::new(bus), Delay);
+    let mut s2 = vl53_8x8::Sensor::new(I2cDevice::new(bus), Delay);
     init_blinking(&mut s2, led).await?;
     defmt::info!("Sensor 2 variant: {}", Debug2Format(&s2.variant()));
 

@@ -17,7 +17,7 @@ use embassy_stm32::i2c::{Config as I2cConfig, I2c};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::{bind_interrupts, dma, i2c, peripherals};
 use embassy_time::Delay;
-use vl53l8cx_async::{PowerMode, RangingMode, Resolution, TargetOrder, Variant, Vl53l8cx};
+use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder, Variant};
 
 bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
@@ -27,7 +27,7 @@ bind_interrupts!(struct Irqs {
 });
 
 type I2cInst = I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>;
-type Sensor = Vl53l8cx<I2cInst, Delay>;
+type Sensor = vl53_8x8::Sensor<I2cInst, Delay>;
 
 const CYCLES_PER_MS: u32 = 96_000; // SYSCLK = 96 MHz
 
@@ -85,7 +85,7 @@ fn board_init() -> Sensor {
         p.I2C1, p.PB6, p.PB7, p.DMA1_CH7, p.DMA1_CH0, Irqs, i2c_config,
     );
 
-    Vl53l8cx::new(i2c, Delay)
+    vl53_8x8::Sensor::new(i2c, Delay)
 }
 
 #[embedded_test::tests]

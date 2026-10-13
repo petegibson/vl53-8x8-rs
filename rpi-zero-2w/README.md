@@ -3,9 +3,9 @@
 VL53L8CX example bins for a Raspberry Pi Zero 2W driving a Pololu VL53L8CX
 breakout over SPI0. Two bins:
 
-- `blocking` — uses [`vl53l8cx-driver`](../vl53l8cx-driver), the blocking
+- `blocking` — uses [`vl53l8cx-uld`](../vl53l8cx-uld), the blocking
   wrapper around the ST ULD C firmware.
-- `async_demo` — uses [`vl53l8cx-async`](../vl53l8cx-async), the pure-Rust
+- `async_demo` — uses [`vl53-8x8`](../vl53-8x8), the pure-Rust
   async port, on a single-threaded Tokio runtime.
 
 > **Note on `async_demo`:** `linux-embedded-hal`'s `SpidevDevice` only

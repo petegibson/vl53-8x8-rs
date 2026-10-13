@@ -1,34 +1,41 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(async_fn_in_trait)]
 /*!
-An async, platform-agnostic, pure-Rust driver for the STMicroelectronics
-VL53L5CX and VL53L8CX multizone Time-of-Flight sensors.
+`vl53-8x8`: an async, platform-agnostic, pure-Rust driver for the
+STMicroelectronics VL53L5CX and VL53L8CX 8x8 multizone Time-of-Flight sensors.
 
 The driver speaks to the sensor over `embedded-hal-async` I2C or SPI and
 reimplements the ST Ultra Lite Driver (ULD) protocol in Rust: there is no C
 code, no FFI and no build script, so it builds for any target without libclang.
 It detects the connected part at runtime ([`detect`], [`Variant`]) and uploads a
 single shared firmware image patched per variant ([`firmware`], [`sensor`]).
+The entry point is [`Sensor`]; [`Spi`] adapts an `SpiDevice` to the bus trait
+and [`BlockingI2c`] wraps a blocking `embedded-hal` I2C bus.
+
+Crate family:
+
+- `vl53-8x8-types`: shared enums, `Error` and result types; no dependencies.
+  Re-exported here so dependants need only this crate.
+- `vl53-8x8` (this crate): the pure-Rust L5CX/L8CX driver.
+- `vl53l8cx-uld-sys`: bindgen + cc over ST's L8CX ULD C sources.
+- `vl53l8cx-uld`: safe blocking wrapper over that ULD.
 
 What comes from where:
 
-- Shared types (`Error`, the mode enums, plugin configuration structs) are
-  re-exported from the dependency-free `vl53-8x8-types` crate.
 - Protocol constants are transcribed from the ULD headers in a private
   `consts` module.
 - ST's data tables (default configuration, default crosstalk shape, NVM-read
   command) are the generated `uld_data` module; the 86 KB firmware image is
   `vl53l8cx_fw_base.bin`. Both are produced from the ULD's
   `vl53l8cx_buffers.h` by `tools/extract_uld_blobs.py`. To take a new ULD
-  release: replace the C tree under `vl53l8cx-sys/src/VL53L8CX_ULD_API/`, run
-  `python3 tools/extract_uld_blobs.py`, run `cargo test -p vl53l8cx-async`
+  release: replace the C tree under `vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`,
+  run `python3 tools/extract_uld_blobs.py`, run `cargo test -p vl53-8x8`
   and review the diff.
 - [`ResultsData`] is a `#[repr(C)]` rendering of the ULD's result struct
   with the same feature gating.
 
-`vl53l8cx-sys` (bindgen over the C ULD) is a dev-dependency only, used by the
-oracle tests to check the constants, tables and layouts above against the C
-build.
+`vl53l8cx-uld-sys` is a dev-dependency only, used by the oracle tests to check
+the constants, tables and layouts above against the C build.
 */
 
 pub mod bus;
@@ -74,11 +81,11 @@ const NB_THRESHOLDS: usize = VL53L8CX_NB_THRESHOLDS as usize;
 #[cfg(any(feature = "motion", feature = "thresholds"))]
 pub use types::MotionConfiguration;
 
-pub use bus::{BlockingI2c, Vl53l8cxSpiDevice};
+pub use bus::{BlockingI2c, Spi};
 pub use firmware::{FirmwareSource, PatchedFirmware, SliceFirmware};
 pub use sensor::{detect, Variant};
 
-pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
+pub struct Sensor<BUS, D, RST = NoPin, INT = NoPin> {
     bus: BUS,
     delay: D,
     address: SevenBitAddress,
@@ -88,13 +95,13 @@ pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     int_is_data_ready_high: bool,
     stdev: State,
     /// Sensor variant. Defaults to [`Variant::L8`] and is set to the detected
-    /// part by [`Vl53l8cx::init`].
+    /// part by [`Sensor::init`].
     variant: Variant,
 }
 
 // --- Constructors ---
 
-impl<BUS, D> Vl53l8cx<BUS, D, NoPin, NoPin>
+impl<BUS, D> Sensor<BUS, D, NoPin, NoPin>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -114,14 +121,14 @@ where
     }
 }
 
-impl<SPI, D> Vl53l8cx<Vl53l8cxSpiDevice<SPI>, D, NoPin, NoPin>
+impl<SPI, D> Sensor<Spi<SPI>, D, NoPin, NoPin>
 where
     SPI: embedded_hal_async::spi::SpiDevice,
     D: DelayNs,
 {
     pub fn new_spi(spi: SPI, delay: D) -> Self {
         Self {
-            bus: Vl53l8cxSpiDevice { spi },
+            bus: Spi { spi },
             delay,
             address: DEFAULT_ADDRESS,
             reset_pin: NoPin,
@@ -136,10 +143,10 @@ where
 
 // --- Builder methods ---
 
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT> {
     /// Attach at `address` instead of [`DEFAULT_ADDRESS`], without touching the
     /// sensor. For re-attaching a handle to a sensor previously moved by
-    /// [`Vl53l8cx::set_i2c_address`]; pair with [`Vl53l8cx::redetect`] to skip
+    /// [`Sensor::set_i2c_address`]; pair with [`Sensor::redetect`] to skip
     /// the firmware re-upload.
     pub fn with_address(mut self, address: SevenBitAddress) -> Self {
         self.address = address;
@@ -149,8 +156,8 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
     pub fn with_reset_pin_active_low<RstNew>(
         self,
         reset_pin: RstNew,
-    ) -> Vl53l8cx<BUS, D, RstNew, INT> {
-        Vl53l8cx {
+    ) -> Sensor<BUS, D, RstNew, INT> {
+        Sensor {
             bus: self.bus,
             delay: self.delay,
             address: self.address,
@@ -166,8 +173,8 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
     pub fn with_reset_pin_active_high<RstNew>(
         self,
         reset_pin: RstNew,
-    ) -> Vl53l8cx<BUS, D, RstNew, INT> {
-        Vl53l8cx {
+    ) -> Sensor<BUS, D, RstNew, INT> {
+        Sensor {
             bus: self.bus,
             delay: self.delay,
             address: self.address,
@@ -183,8 +190,8 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
     pub fn with_interrupt_pin_active_low<IntNew>(
         self,
         int_pin: IntNew,
-    ) -> Vl53l8cx<BUS, D, RST, IntNew> {
-        Vl53l8cx {
+    ) -> Sensor<BUS, D, RST, IntNew> {
+        Sensor {
             bus: self.bus,
             delay: self.delay,
             address: self.address,
@@ -200,8 +207,8 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
     pub fn with_interrupt_pin_active_high<IntNew>(
         self,
         int_pin: IntNew,
-    ) -> Vl53l8cx<BUS, D, RST, IntNew> {
-        Vl53l8cx {
+    ) -> Sensor<BUS, D, RST, IntNew> {
+        Sensor {
             bus: self.bus,
             delay: self.delay,
             address: self.address,
@@ -217,7 +224,7 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
 
 // --- Reset methods (requires OutputPin) ---
 
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -244,7 +251,7 @@ where
 
 // --- Interrupt-based data ready (requires Wait) ---
 
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     INT: Wait,
@@ -261,7 +268,7 @@ where
     }
 }
 
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -277,7 +284,7 @@ where
 
 // --- Blocking interrupt data ready (requires InputPin) ---
 
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     INT: InputPin,
@@ -297,14 +304,14 @@ where
 
 // --- Core async methods ---
 
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     D: DelayNs,
 {
     /// Detect the connected sensor variant, then upload its (patched) firmware
     /// and bring the sensor up. The detected variant is stored and available
-    /// via [`Vl53l8cx::variant`].
+    /// via [`Sensor::variant`].
     pub async fn init(&mut self) -> Result<(), Error<BUS::Error>> {
         self.variant = sensor::detect(&mut self.bus, self.address).await?;
 
@@ -321,16 +328,16 @@ where
         .await
     }
 
-    /// The sensor variant detected by [`Vl53l8cx::init`]. Before `init` this is
+    /// The sensor variant detected by [`Sensor::init`]. Before `init` this is
     /// the default ([`Variant::L8`]), not a detected value.
     pub fn variant(&self) -> Variant {
         self.variant
     }
 
     /// Re-detect the sensor variant at the current address, without the
-    /// firmware upload done by [`Vl53l8cx::init`]. For handles created with
-    /// [`Vl53l8cx::with_address`] against an already-initialised sensor:
-    /// [`Vl53l8cx::start_ranging`] recomputes all per-session state, so after
+    /// firmware upload done by [`Sensor::init`]. For handles created with
+    /// [`Sensor::with_address`] against an already-initialised sensor:
+    /// [`Sensor::start_ranging`] recomputes all per-session state, so after
     /// this the handle can resume ranging where the old one left off.
     pub async fn redetect(&mut self) -> Result<Variant, Error<BUS::Error>> {
         self.variant = sensor::detect(&mut self.bus, self.address).await?;
@@ -812,7 +819,7 @@ where
 // --- Detection thresholds (requires "thresholds" feature) ---
 
 #[cfg(feature = "thresholds")]
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -936,7 +943,7 @@ where
 // --- Motion indicator (requires "motion" or "thresholds" feature) ---
 
 #[cfg(any(feature = "motion", feature = "thresholds"))]
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -1034,7 +1041,7 @@ where
 // --- Xtalk (requires "xtalk" feature) ---
 
 #[cfg(feature = "xtalk")]
-impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT>
+impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
 where
     BUS: VlBusAsync,
     D: DelayNs,

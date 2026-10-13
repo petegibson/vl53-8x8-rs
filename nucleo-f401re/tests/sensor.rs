@@ -3,10 +3,10 @@
 
 use defmt_rtt as _;
 
-use vl53l8cx_driver::{PowerMode, RangingMode, Resolution, TargetOrder};
+use vl53l8cx_uld::{PowerMode, RangingMode, Resolution, TargetOrder};
 
 #[cfg(feature = "thresholds")]
-use vl53l8cx_driver::{
+use vl53l8cx_uld::{
     DetectionThreshold, MotionConfiguration, ThresholdMeasurement, ThresholdOperation,
     ThresholdType,
 };
@@ -406,7 +406,7 @@ mod tests {
     fn test_caldata_xtalk(mut sensor: nucleo_f401re::Sensor) {
         sensor.init().unwrap();
 
-        let mut buffer = [0u8; vl53l8cx_driver::XTALK_BUFFER_SIZE];
+        let mut buffer = [0u8; vl53l8cx_uld::XTALK_BUFFER_SIZE];
         sensor.get_caldata_xtalk(&mut buffer).unwrap();
 
         // Buffer should have been filled with calibration data

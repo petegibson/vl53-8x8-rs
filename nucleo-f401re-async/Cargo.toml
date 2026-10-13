@@ -2,6 +2,7 @@
 name = "nucleo-f401re-async"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [dependencies]
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
@@ -14,16 +15,16 @@ embassy-time = "0.5.0"
 embedded-hal = "1.0"
 embedded-hal-bus = { version = "0.3", features = ["async"], optional = true }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
-vl53l8cx-async = { path = "../vl53l8cx-async" }
+vl53-8x8 = { path = "../vl53-8x8" }
 
 [features]
 default = []
 blocking-i2c = []
 spi-bus = ["dep:embedded-hal-bus"]
-defmt-bus-trace = ["vl53l8cx-async/defmt"]
-xtalk = ["vl53l8cx-async/xtalk"]
-motion = ["vl53l8cx-async/motion"]
-thresholds = ["vl53l8cx-async/thresholds"]
+defmt-bus-trace = ["vl53-8x8/defmt"]
+xtalk = ["vl53-8x8/xtalk"]
+motion = ["vl53-8x8/motion"]
+thresholds = ["vl53-8x8/thresholds"]
 
 [[bin]]
 name = "nucleo-f401re-async"

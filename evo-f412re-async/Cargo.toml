@@ -2,6 +2,7 @@
 name = "evo-f412re-async"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Async VL53L5CX/VL53L8CX demo for a custom STM32F412RE board (autodetect + patched firmware)."
 
 [dependencies]
@@ -17,15 +18,15 @@ embassy-sync = "0.8.0"
 embassy-time = { version = "0.5.1", features = ["defmt", "tick-hz-32_768"] }
 embedded-hal = "1.0"
 panic-probe = { version = "1.0", features = ["print-defmt"] }
-vl53l8cx-async = { path = "../vl53l8cx-async" }
+vl53-8x8 = { path = "../vl53-8x8" }
 
 [features]
 default = []
 # Forward driver I2C trace logging.
-defmt-bus-trace = ["vl53l8cx-async/defmt"]
-xtalk = ["vl53l8cx-async/xtalk"]
-motion = ["vl53l8cx-async/motion"]
-thresholds = ["vl53l8cx-async/thresholds"]
+defmt-bus-trace = ["vl53-8x8/defmt"]
+xtalk = ["vl53-8x8/xtalk"]
+motion = ["vl53-8x8/motion"]
+thresholds = ["vl53-8x8/thresholds"]
 
 [[bin]]
 name = "evo-f412re-async"
