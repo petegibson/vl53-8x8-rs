@@ -40,6 +40,9 @@ this repository:
   X-NUCLEO-53L8A1 expansion shield, both I²C and SPI, both blocking
   (`stm32f4xx-hal`) and async (`embassy-stm32`) execution. See
   [`nucleo-f401re/`](./nucleo-f401re) and [`nucleo-f401re-async/`](./nucleo-f401re-async).
+* **Bare-metal Cortex-M4, async DMA I²C** — custom STM32F412RE board with a
+  VL53L8CX, pure-Rust `vl53-8x8` driver including the firmware upload path.
+  See [`evo-f412re-async/`](./evo-f412re-async).
 * **Linux on Raspberry Pi Zero 2W** — Pololu VL53L8CX breakout over
   `/dev/spidev0.0` and `/dev/gpiochip0` via `linux-embedded-hal`, both
   blocking and async (Tokio current-thread). See

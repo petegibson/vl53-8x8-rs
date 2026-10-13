@@ -101,10 +101,15 @@ git diff vl53-8x8/src/uld_data.rs          # review the table changes
 
 ## Hardware verification
 
-Verified so far with this crate layout: STM32F401RE Nucleo with the
-X-NUCLEO-53L8A1 shield (VL53L8CX) over SPI, via the `nucleo-f401re-async`
-demo and its on-target tests. VL53L5CX support and I2C on other boards are
-implemented but their verification with the current layout is pending.
+Verified with this crate layout, via the demo crates' on-target test suites:
+
+* STM32F401RE Nucleo + X-NUCLEO-53L8A1 shield (VL53L8CX) over SPI
+  (`nucleo-f401re-async`).
+* STM32F412RE custom board (VL53L8CX) over async DMA I2C, including the
+  firmware upload path (`evo-f412re-async`).
+
+VL53L5CX support is implemented and was validated on hardware before this
+crate layout; re-verification with the current layout is pending.
 
 ## License
 
