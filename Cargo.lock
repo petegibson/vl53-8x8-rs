@@ -407,6 +407,7 @@ dependencies = [
  "defmt",
  "embedded-hal",
  "embedded-hal-async",
+ "vl53-8x8-types",
  "vl53l8cx-sys",
 ]
 

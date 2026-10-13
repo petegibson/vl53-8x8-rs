@@ -14,7 +14,8 @@
 use crate::bus::VlBusAsync;
 use crate::firmware::{PatchedFirmware, BASE_FIRMWARE};
 use embedded_hal::i2c::SevenBitAddress;
-use vl53l8cx_sys::{Error, VL53L8CX_FW_CHECKSUM};
+use crate::consts::VL53L8CX_FW_CHECKSUM;
+use vl53_8x8_types::Error;
 
 /// Device id register (reg 0) value common to both supported parts.
 const DEVICE_ID: u8 = 0xF0;

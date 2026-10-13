@@ -7,29 +7,41 @@ license = "BSD-3-Clause"
 description = "An async, platform-agnostic Rust driver for the STMicroelectronics VL53L8CX Time-of-Flight sensor."
 
 [dependencies]
-vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
+vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.0" }
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 defmt = { version = "1", optional = true }
 
+[dev-dependencies]
+# Oracle for the tests only: the C ULD as compiled by bindgen/cc. Never linked
+# into the driver, so downstream builds need no libclang. Built with its default
+# features; layout tests therefore run only under this crate's default features.
+vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
+
 [features]
 default = []
-xtalk = ["vl53l8cx-sys/xtalk"]
-motion = ["vl53l8cx-sys/motion"]
-thresholds = ["vl53l8cx-sys/thresholds"]
-raw-format = ["vl53l8cx-sys/raw-format"]
+# ULD plugins. Gate the plugin APIs here and the matching types in vl53-8x8-types.
+xtalk = ["vl53-8x8-types/xtalk"]
+motion = ["vl53-8x8-types/motion"]
+thresholds = ["vl53-8x8-types/thresholds"]
+# Return results in the sensor's raw fixed-point units instead of converting
+# to mm / kcps / percent (ULD `VL53L8CX_USE_RAW_FORMAT`).
+raw-format = []
 
+# Targets per zone (ULD `VL53L8CX_NB_TARGET_PER_ZONE`); default is 1.
 targets-1 = []
 targets-2 = []
 targets-3 = []
 targets-4 = []
 
-disable-ambient = ["vl53l8cx-sys/disable-ambient"]
-disable-spads = ["vl53l8cx-sys/disable-spads"]
-disable-nb-targets = ["vl53l8cx-sys/disable-nb-targets"]
-disable-signal = ["vl53l8cx-sys/disable-signal"]
-disable-range-sigma = ["vl53l8cx-sys/disable-range-sigma"]
-disable-distance = ["vl53l8cx-sys/disable-distance"]
-disable-target-status = ["vl53l8cx-sys/disable-target-status"]
-disable-reflectance = ["vl53l8cx-sys/disable-reflectance"]
-disable-motion-indicator-output = ["vl53l8cx-sys/disable-motion-indicator-output"]
+# Drop individual result outputs to shrink frames and `ResultsData`
+# (ULD `VL53L8CX_DISABLE_*`). See `results.rs` for the exact mapping.
+disable-ambient = []
+disable-spads = []
+disable-nb-targets = []
+disable-signal = []
+disable-range-sigma = []
+disable-distance = []
+disable-target-status = []
+disable-reflectance = []
+disable-motion-indicator-output = []

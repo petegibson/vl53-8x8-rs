@@ -3,7 +3,15 @@ use crate::firmware::FirmwareSource;
 use crate::sensor::{SensorInfo, Variant};
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
-use vl53l8cx_sys::*;
+use crate::consts::*;
+use crate::results::ResultsData;
+use crate::state::State;
+use crate::uld_data::{DEFAULT_CONFIGURATION, DEFAULT_XTALK, GET_NVM_CMD};
+use vl53_8x8_types::{
+    Error, FirmwareError, VL53L8CX_RESOLUTION_4X4, VL53L8CX_STATUS_ERROR, XTALK_BUFFER_SIZE,
+};
+#[cfg(not(feature = "raw-format"))]
+use vl53_8x8_types::VL53L8CX_RESOLUTION_8X8;
 
 /// L5-only DCI index for the glare filter (absent on the VL53L8CX).
 const VL53L5CX_GLARE_FILTER: u16 = 0xE108;
@@ -400,11 +408,11 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
     addr: SevenBitAddress,
     delay: &mut D,
-    stdev: &mut VL53L8CX_Configuration,
+    stdev: &mut State,
     fw: &mut impl FirmwareSource,
     info: &SensorInfo,
 ) -> Result<(), Error<BUS::Error>> {
-    stdev.is_auto_stop_enabled = 0;
+    stdev.is_auto_stop_enabled = false;
     let is_l5 = info.variant == Variant::L5;
 
     // SW reboot sequence
@@ -563,7 +571,7 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     }
 
     // Get offset NVM data
-    let nvm_cmd = unsafe { &VL53L8CX_GET_NVM_CMD };
+    let nvm_cmd = &GET_NVM_CMD;
     bus.write(addr, 0x2FD8, nvm_cmd)
         .await
         .map_err(Error::Bus)?;
@@ -599,7 +607,7 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     .await?;
 
     // Set default Xtalk shape
-    let default_xtalk = unsafe { &VL53L8CX_DEFAULT_XTALK };
+    let default_xtalk = &DEFAULT_XTALK;
     stdev.xtalk_data[..XTALK_BUFFER_SIZE].copy_from_slice(default_xtalk);
     send_xtalk_data(
         bus,
@@ -614,7 +622,7 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     // Send default configuration. The shared base is the L8 blob; apply the
     // variant config overlay (5 bytes for L5) into temp_buffer before sending.
     let cfg_len = VL53L8CX_CONFIGURATION_SIZE as usize;
-    stdev.temp_buffer[..cfg_len].copy_from_slice(unsafe { &VL53L8CX_DEFAULT_CONFIGURATION });
+    stdev.temp_buffer[..cfg_len].copy_from_slice(&DEFAULT_CONFIGURATION);
     for &(off, val) in info.config_patch {
         stdev.temp_buffer[off] = val;
     }
@@ -696,7 +704,7 @@ pub async fn is_alive<BUS: VlBusAsync>(
 pub async fn check_data_ready<BUS: VlBusAsync>(
     bus: &mut BUS,
     addr: SevenBitAddress,
-    stdev: &mut VL53L8CX_Configuration,
+    stdev: &mut State,
 ) -> Result<bool, Error<BUS::Error>> {
     bus.read(addr, 0x0000, &mut stdev.temp_buffer[..4])
         .await
@@ -747,12 +755,15 @@ fn copy_result_block<E>(
     Ok(())
 }
 
+// `clamp_negative_distance` is only consulted by the unit conversion that
+// `raw-format` removes.
+#[cfg_attr(feature = "raw-format", allow(unused_variables))]
 pub async fn get_ranging_data<BUS: VlBusAsync>(
     bus: &mut BUS,
     addr: SevenBitAddress,
-    stdev: &mut VL53L8CX_Configuration,
+    stdev: &mut State,
     clamp_negative_distance: bool,
-) -> Result<VL53L8CX_ResultsData, Error<BUS::Error>> {
+) -> Result<ResultsData, Error<BUS::Error>> {
     let read_size = stdev.data_read_size as usize;
     bus.read(addr, 0x0000, &mut stdev.temp_buffer[..read_size])
         .await
@@ -761,7 +772,7 @@ pub async fn get_ranging_data<BUS: VlBusAsync>(
     stdev.streamcount = stdev.temp_buffer[0];
     swap_buffer(&mut stdev.temp_buffer, read_size);
 
-    let mut results: VL53L8CX_ResultsData = unsafe { core::mem::zeroed() };
+    let mut results = ResultsData::default();
 
     // Parse block headers starting at position 16. The data blocks occupy
     // [16, read_size - 4); the final 4 bytes are the frame footer (a tag whose
@@ -950,7 +961,7 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
     addr: SevenBitAddress,
     delay: &mut D,
-    stdev: &mut VL53L8CX_Configuration,
+    stdev: &mut State,
     has_laser_safety_check: bool,
 ) -> Result<(), Error<BUS::Error>> {
     // Get current resolution (use local buffer to avoid corrupting offset_data)
@@ -1156,7 +1167,7 @@ pub async fn stop_ranging<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
     addr: SevenBitAddress,
     delay: &mut D,
-    stdev: &mut VL53L8CX_Configuration,
+    stdev: &mut State,
 ) -> Result<(), Error<BUS::Error>> {
     // Check auto-stop flag
     bus.read(addr, 0x2FFC, &mut stdev.temp_buffer[..4])
@@ -1169,7 +1180,7 @@ pub async fn stop_ranging<BUS: VlBusAsync, D: DelayNs>(
         stdev.temp_buffer[3],
     ]);
 
-    if auto_stop_flag != 0x4FF && stdev.is_auto_stop_enabled == 0 {
+    if auto_stop_flag != 0x4FF && !stdev.is_auto_stop_enabled {
         bus.write_byte(addr, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
 
         // Provoke MCU stop
@@ -1219,31 +1230,6 @@ pub async fn set_i2c_address<BUS: VlBusAsync>(
     bus.write_byte(new_addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
     Ok(())
 }
-
-/// Number of targets per zone (compile-time constant matching C config).
-const NB_TARGET_PER_ZONE: u8 = {
-    #[cfg(feature = "targets-4")]
-    { 4 }
-    #[cfg(all(feature = "targets-3", not(feature = "targets-4")))]
-    { 3 }
-    #[cfg(all(feature = "targets-2", not(feature = "targets-3"), not(feature = "targets-4")))]
-    { 2 }
-    #[cfg(not(any(feature = "targets-2", feature = "targets-3", feature = "targets-4")))]
-    { 1 }
-};
-
-// Block header index constants from vl53l8cx_api.h
-const VL53L8CX_METADATA_IDX: u16 = 0x54B4;
-const VL53L8CX_AMBIENT_RATE_IDX: u16 = 0x54D0;
-const VL53L8CX_SPAD_COUNT_IDX: u16 = 0x55D0;
-const VL53L8CX_NB_TARGET_DETECTED_IDX: u16 = 0xDB84;
-const VL53L8CX_SIGNAL_RATE_IDX: u16 = 0xDBC4;
-const VL53L8CX_RANGE_SIGMA_MM_IDX: u16 = 0xDEC4;
-const VL53L8CX_DISTANCE_IDX: u16 = 0xDF44;
-const VL53L8CX_REFLECTANCE_EST_PC_IDX: u16 = 0xE044;
-const VL53L8CX_TARGET_STATUS_IDX: u16 = 0xE084;
-#[cfg(feature = "motion")]
-const VL53L8CX_MOTION_DETEC_IDX: u16 = 0xD858;
 
 #[cfg(test)]
 mod tests {
@@ -1304,7 +1290,7 @@ mod tests {
     fn footer_streamcount_is_not_parsed_as_a_block() {
         for sc in [0x00u8, 0x0F, 0x10, 0x11, 0x80, 0xFF] {
             let frame = make_frame(sc);
-            let mut stdev: VL53L8CX_Configuration = unsafe { core::mem::zeroed() };
+            let mut stdev = State::new();
             stdev.data_read_size = 32;
             let mut bus = FrameBus(&frame);
             let result = block_on(get_ranging_data(&mut bus, 0x29, &mut stdev, false));

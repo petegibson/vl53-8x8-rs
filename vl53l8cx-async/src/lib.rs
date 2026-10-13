@@ -1,34 +1,68 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(async_fn_in_trait)]
 /*!
-An async, platform-agnostic driver for the VL53L8CX Time-of-Flight sensor.
+An async, platform-agnostic, pure-Rust driver for the STMicroelectronics
+VL53L5CX and VL53L8CX multizone Time-of-Flight sensors.
 
-This driver uses `embedded-hal-async` traits and reimplements all I/O in pure Rust —
-no C FFI calls at runtime. It uses `vl53l8cx-sys` for shared types, constants, and
-data blobs (firmware, configuration, xtalk tables).
+The driver speaks to the sensor over `embedded-hal-async` I2C or SPI and
+reimplements the ST Ultra Lite Driver (ULD) protocol in Rust: there is no C
+code, no FFI and no build script, so it builds for any target without libclang.
+It detects the connected part at runtime ([`detect`], [`Variant`]) and uploads a
+single shared firmware image patched per variant ([`firmware`], [`sensor`]).
+
+What comes from where:
+
+- Shared types (`Error`, the mode enums, plugin configuration structs) are
+  re-exported from the dependency-free `vl53-8x8-types` crate.
+- Protocol constants are transcribed from the ULD headers in a private
+  `consts` module.
+- ST's data tables (default configuration, default crosstalk shape, NVM-read
+  command) are the generated `uld_data` module; the 86 KB firmware image is
+  `vl53l8cx_fw_base.bin`. Both are produced from the ULD's
+  `vl53l8cx_buffers.h` by `tools/extract_uld_blobs.py`. To take a new ULD
+  release: replace the C tree under `vl53l8cx-sys/src/VL53L8CX_ULD_API/`, run
+  `python3 tools/extract_uld_blobs.py`, run `cargo test -p vl53l8cx-async`
+  and review the diff.
+- [`ResultsData`] is a `#[repr(C)]` rendering of the ULD's result struct
+  with the same feature gating.
+
+`vl53l8cx-sys` (bindgen over the C ULD) is a dev-dependency only, used by the
+oracle tests to check the constants, tables and layouts above against the C
+build.
 */
 
 pub mod bus;
+mod consts;
 pub mod firmware;
 pub mod ops;
+mod results;
 pub mod sensor;
+mod state;
+mod uld_data;
+
+#[cfg(test)]
+mod oracle_tests;
 
 use bus::VlBusAsync;
 use embedded_hal::digital::{InputPin, OutputPin};
 pub use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::digital::Wait;
-use vl53l8cx_sys as sys;
+use state::State;
+use vl53_8x8_types as types;
 
-// Re-export shared types from sys
-pub use sys::{
+// Shared types, re-exported so dependants need only this crate.
+pub use types::{
     Error, FirmwareError, NoPin, PowerMode, RangingMode, Resolution, TargetOrder,
-    VL53L8CX_Configuration, VL53L8CX_ResultsData as ResultsData, DEFAULT_ADDRESS,
-    XTALK_BUFFER_SIZE,
+    DEFAULT_ADDRESS, XTALK_BUFFER_SIZE,
 };
 
+pub use results::ResultsData;
+#[cfg(all(feature = "motion", not(feature = "disable-motion-indicator-output")))]
+pub use results::MotionIndicator;
+
 #[cfg(feature = "thresholds")]
-pub use sys::{
+pub use types::{
     DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType,
     VL53L8CX_NB_THRESHOLDS,
 };
@@ -38,8 +72,7 @@ pub use sys::{
 const NB_THRESHOLDS: usize = VL53L8CX_NB_THRESHOLDS as usize;
 
 #[cfg(any(feature = "motion", feature = "thresholds"))]
-pub use sys::MotionConfiguration;
-
+pub use types::MotionConfiguration;
 
 pub use bus::{BlockingI2c, Vl53l8cxSpiDevice};
 pub use firmware::{FirmwareSource, PatchedFirmware, SliceFirmware};
@@ -53,7 +86,7 @@ pub struct Vl53l8cx<BUS, D, RST = NoPin, INT = NoPin> {
     int_pin: INT,
     lp_is_reset_high: bool,
     int_is_data_ready_high: bool,
-    stdev: VL53L8CX_Configuration,
+    stdev: State,
     /// Sensor variant. Defaults to [`Variant::L8`] and is set to the detected
     /// part by [`Vl53l8cx::init`].
     variant: Variant,
@@ -75,7 +108,7 @@ where
             int_pin: NoPin,
             lp_is_reset_high: false,
             int_is_data_ready_high: false,
-            stdev: unsafe { core::mem::zeroed() },
+            stdev: State::new(),
             variant: Variant::L8,
         }
     }
@@ -95,7 +128,7 @@ where
             int_pin: NoPin,
             lp_is_reset_high: false,
             int_is_data_ready_high: false,
-            stdev: unsafe { core::mem::zeroed() },
+            stdev: State::new(),
             variant: Variant::L8,
         }
     }
@@ -110,7 +143,6 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
     /// the firmware re-upload.
     pub fn with_address(mut self, address: SevenBitAddress) -> Self {
         self.address = address;
-        self.stdev.platform.address = (address as u16) << 1;
         self
     }
 
@@ -274,8 +306,6 @@ where
     /// and bring the sensor up. The detected variant is stored and available
     /// via [`Vl53l8cx::variant`].
     pub async fn init(&mut self) -> Result<(), Error<BUS::Error>> {
-        self.stdev.platform.address = (self.address as u16) << 1;
-
         self.variant = sensor::detect(&mut self.bus, self.address).await?;
 
         let mut fw = self.variant.firmware();
@@ -374,7 +404,7 @@ where
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut dss_buf,
-                    sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
+                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
                 dss_buf[0x04] = 64;
                 dss_buf[0x06] = 64;
@@ -382,13 +412,13 @@ where
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut dss_buf,
-                    sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
+                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
 
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut zone_buf,
-                    sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
                 zone_buf[0x00] = 4;
                 zone_buf[0x01] = 4;
@@ -397,14 +427,14 @@ where
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut zone_buf,
-                    sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
             }
             Resolution::Res8x8 => {
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut dss_buf,
-                    sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
+                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
                 dss_buf[0x04] = 16;
                 dss_buf[0x06] = 16;
@@ -412,13 +442,13 @@ where
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut dss_buf,
-                    sys::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
+                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
                 ).await?;
 
                 ops::dci_read(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut zone_buf,
-                    sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
                 zone_buf[0x00] = 8;
                 zone_buf[0x01] = 8;
@@ -427,7 +457,7 @@ where
                 ops::dci_write(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, &mut zone_buf,
-                    sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
                 ).await?;
             }
         }
@@ -449,10 +479,10 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+            consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
         ).await?;
         let res = buf[0] * buf[1];
-        if res == sys::VL53L8CX_RESOLUTION_8X8 {
+        if res == types::VL53L8CX_RESOLUTION_8X8 {
             Ok(Resolution::Res8x8)
         } else {
             Ok(Resolution::Res4x4)
@@ -464,7 +494,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_FREQ_HZ as u32, 4,
+            consts::VL53L8CX_DCI_FREQ_HZ as u32, 4,
             &[frequency_hz], 0x01,
         ).await
     }
@@ -474,7 +504,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_FREQ_HZ as u32, 4,
+            consts::VL53L8CX_DCI_FREQ_HZ as u32, 4,
         ).await?;
         Ok(buf[0x01])
     }
@@ -488,7 +518,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_INT_TIME as u32, 20,
+            consts::VL53L8CX_DCI_INT_TIME as u32, 20,
             &integration, 0x00,
         ).await
     }
@@ -498,7 +528,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_INT_TIME as u32, 20,
+            consts::VL53L8CX_DCI_INT_TIME as u32, 20,
         ).await?;
         let time_us = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
         Ok(time_us / 1000)
@@ -510,7 +540,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_TARGET_ORDER as u32, 4,
+            consts::VL53L8CX_DCI_TARGET_ORDER as u32, 4,
             &[val], 0x00,
         ).await
     }
@@ -520,9 +550,9 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_TARGET_ORDER as u32, 4,
+            consts::VL53L8CX_DCI_TARGET_ORDER as u32, 4,
         ).await?;
-        if buf[0] == sys::VL53L8CX_TARGET_ORDER_STRONGEST {
+        if buf[0] == types::VL53L8CX_TARGET_ORDER_STRONGEST {
             Ok(TargetOrder::Strongest)
         } else {
             Ok(TargetOrder::Closest)
@@ -534,7 +564,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_RANGING_MODE as u32, 8,
+            consts::VL53L8CX_DCI_RANGING_MODE as u32, 8,
         ).await?;
 
         let single_range: u32;
@@ -554,14 +584,14 @@ where
         ops::dci_write(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_RANGING_MODE as u32, 8,
+            consts::VL53L8CX_DCI_RANGING_MODE as u32, 8,
         ).await?;
 
         let mut sr_bytes = single_range.to_le_bytes();
         ops::dci_write(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut sr_bytes,
-            sys::VL53L8CX_DCI_SINGLE_RANGE as u32, 4,
+            consts::VL53L8CX_DCI_SINGLE_RANGE as u32, 4,
         ).await
     }
 
@@ -570,7 +600,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_RANGING_MODE as u32, 8,
+            consts::VL53L8CX_DCI_RANGING_MODE as u32, 8,
         ).await?;
         if buf[0x01] == 0x01 {
             Ok(RangingMode::Continuous)
@@ -588,7 +618,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_SHARPENER as u32, 16,
+            consts::VL53L8CX_DCI_SHARPENER as u32, 16,
             &[sharpener], 0x0D,
         ).await
     }
@@ -598,7 +628,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_SHARPENER as u32, 16,
+            consts::VL53L8CX_DCI_SHARPENER as u32, 16,
         ).await?;
         Ok((buf[0x0D] as u16 * 100 / 255) as u8)
     }
@@ -677,7 +707,7 @@ where
             0x02 => PowerMode::Sleep,
             _ => {
                 self.bus.write_byte(self.address, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
-                return Err(Error::Firmware(FirmwareError::Unknown(sys::VL53L8CX_STATUS_ERROR)));
+                return Err(Error::Firmware(FirmwareError::Unknown(types::VL53L8CX_STATUS_ERROR)));
             }
         };
 
@@ -691,7 +721,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_VHV_CONFIG as u32, 16,
+            consts::VL53L8CX_DCI_VHV_CONFIG as u32, 16,
             &count_bytes, 0x04,
         ).await
     }
@@ -701,7 +731,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_VHV_CONFIG as u32, 16,
+            consts::VL53L8CX_DCI_VHV_CONFIG as u32, 16,
         ).await?;
         Ok(u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]))
     }
@@ -715,7 +745,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_SYNC_PIN as u32, 4,
+            consts::VL53L8CX_DCI_SYNC_PIN as u32, 4,
         ).await?;
 
         if enabled {
@@ -727,7 +757,7 @@ where
         ops::dci_write(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_SYNC_PIN as u32, 4,
+            consts::VL53L8CX_DCI_SYNC_PIN as u32, 4,
         ).await
     }
 
@@ -740,7 +770,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_SYNC_PIN as u32, 4,
+            consts::VL53L8CX_DCI_SYNC_PIN as u32, 4,
         ).await?;
         Ok((buf[3] & 0x02) != 0)
     }
@@ -767,13 +797,13 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_INTERNAL_CP as u32, 16,
+            consts::VL53L8CX_DCI_INTERNAL_CP as u32, 16,
             &[vcsel_bootup_fsm], 0x0A,
         ).await?;
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_INTERNAL_CP as u32, 16,
+            consts::VL53L8CX_DCI_INTERNAL_CP as u32, 16,
             &[analog_dynamic_pad_0], 0x0E,
         ).await
     }
@@ -792,7 +822,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG as u32, 8,
+            consts::VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG as u32, 8,
         ).await?;
         Ok(buf[0x01] != 0)
     }
@@ -809,7 +839,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG as u32, 8,
+            consts::VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG as u32, 8,
             &grp_global_config, 0x00,
         ).await?;
 
@@ -817,7 +847,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data2,
-            sys::VL53L8CX_DCI_DET_THRESH_CONFIG as u32, 20,
+            consts::VL53L8CX_DCI_DET_THRESH_CONFIG as u32, 20,
             &[tmp], 0x11,
         ).await
     }
@@ -867,7 +897,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_DET_THRESH_START as u32, THRESH_SIZE,
+            consts::VL53L8CX_DCI_DET_THRESH_START as u32, THRESH_SIZE,
         ).await?;
 
         // Safety: DetectionThreshold is repr(C) with known size, and buf is properly aligned
@@ -889,7 +919,7 @@ where
         ops::dci_write(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut grp_valid_target_cfg,
-            sys::VL53L8CX_DCI_DET_THRESH_VALID_STATUS as u32, 8,
+            consts::VL53L8CX_DCI_DET_THRESH_VALID_STATUS as u32, 8,
         ).await?;
 
         // Write thresholds
@@ -898,7 +928,7 @@ where
         ops::dci_write(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_DET_THRESH_START as u32, THRESH_SIZE,
+            consts::VL53L8CX_DCI_DET_THRESH_START as u32, THRESH_SIZE,
         ).await
     }
 }
@@ -964,7 +994,7 @@ where
         ops::dci_write(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_MOTION_DETECTOR_CFG as u32, config_size,
+            consts::VL53L8CX_DCI_MOTION_DETECTOR_CFG as u32, config_size,
         ).await
     }
 
@@ -996,7 +1026,7 @@ where
         ops::dci_write(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_MOTION_DETECTOR_CFG as u32, config_size,
+            consts::VL53L8CX_DCI_MOTION_DETECTOR_CFG as u32, config_size,
         ).await
     }
 }
@@ -1014,7 +1044,7 @@ where
         ops::dci_read(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut buf,
-            sys::VL53L8CX_DCI_XTALK_CFG as u32, 16,
+            consts::VL53L8CX_DCI_XTALK_CFG as u32, 16,
         ).await?;
         let margin = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
         Ok(margin / 2048)
@@ -1029,7 +1059,7 @@ where
         ops::dci_replace(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, &mut data,
-            sys::VL53L8CX_DCI_XTALK_CFG as u32, 16,
+            consts::VL53L8CX_DCI_XTALK_CFG as u32, 16,
             &margin_kcps.to_le_bytes(), 0x00,
         ).await
     }
@@ -1044,18 +1074,18 @@ where
         self.set_resolution(Resolution::Res8x8).await?;
 
         // Send GET_XTALK_CMD to 0x2fb8
-        self.bus.write(self.address, 0x2fb8, &sys::VL53L8CX_GET_XTALK_CMD)
+        self.bus.write(self.address, 0x2fb8, &types::VL53L8CX_GET_XTALK_CMD)
             .await.map_err(Error::Bus)?;
         ops::poll_for_answer(
             &mut self.bus, self.address, &mut self.delay,
             &mut self.stdev.temp_buffer, 4, 1,
-            sys::VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+            consts::VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
         ).await?;
 
         // Read xtalk data (XTALK_BUFFER_SIZE + 4 bytes)
         let read_size = XTALK_BUFFER_SIZE + 4;
         self.bus.read(
-            self.address, sys::VL53L8CX_UI_CMD_START,
+            self.address, consts::VL53L8CX_UI_CMD_START,
             &mut self.stdev.temp_buffer[..read_size],
         ).await.map_err(Error::Bus)?;
 
