@@ -2,6 +2,7 @@
 name = "vl53l8cx-driver"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.81"
 license = "BSD-3-Clause"
 description = "A platform-agnostic Rust driver for the STMicroelectronics VL53L8CX Time-of-Flight sensor."
 
@@ -10,15 +11,11 @@ embedded-hal = "1.0.0" # Using the stable 1.0 version of the hardware abstractio
 vl53l8cx-sys = { path = "../vl53l8cx-sys", version = "0.1.0" }
 defmt = { version = "1", optional = true }
 
-# Make i2cdev optional
-i2cdev = { version = "0.6.2", optional = true }
-
 [dev-dependencies]
 anyhow = "1.0.100"
 
 [features]
 default = []
-std = ["vl53l8cx-sys/std"]
 
 xtalk = ["vl53l8cx-sys/xtalk"]
 motion = ["vl53l8cx-sys/motion"]
@@ -40,6 +37,3 @@ disable-distance = ["vl53l8cx-sys/disable-distance"]
 disable-target-status = ["vl53l8cx-sys/disable-target-status"]
 disable-reflectance = ["vl53l8cx-sys/disable-reflectance"]
 disable-motion-indicator-output = ["vl53l8cx-sys/disable-motion-indicator-output"]
-
-# Define a feature for the i2cdev backend
-i2cdev-backend = ["i2cdev"]

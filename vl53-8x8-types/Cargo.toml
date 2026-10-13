@@ -1,0 +1,16 @@
+[package]
+name = "vl53-8x8-types"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+license = "BSD-3-Clause"
+description = "Shared types for the STMicroelectronics VL53L5CX/VL53L7CX/VL53L8CX 8x8 multizone Time-of-Flight sensor drivers."
+
+[dependencies]
+
+[features]
+# Plugin features. This crate has no code of its own behind them; they only
+# gate the types and constants that belong to the corresponding ULD plugin.
+xtalk = []
+motion = []
+thresholds = []

@@ -2,6 +2,7 @@
 name = "vl53l8cx-async"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.81"
 license = "BSD-3-Clause"
 description = "An async, platform-agnostic Rust driver for the STMicroelectronics VL53L8CX Time-of-Flight sensor."
 
@@ -13,7 +14,6 @@ defmt = { version = "1", optional = true }
 
 [features]
 default = []
-std = ["vl53l8cx-sys/std"]
 xtalk = ["vl53l8cx-sys/xtalk"]
 motion = ["vl53l8cx-sys/motion"]
 thresholds = ["vl53l8cx-sys/thresholds"]

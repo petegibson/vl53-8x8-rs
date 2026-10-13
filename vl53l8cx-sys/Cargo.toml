@@ -2,12 +2,14 @@
 name = "vl53l8cx-sys"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.81"
 description = "Low-level FFI bindings for the STMicroelectronics VL53L8CX Ultra Lite Driver (ULD)."
 license = "BSD-3-Clause"
 links = "vl53l8cx_uld"
 
 [dependencies]
 cty = "0.2"
+vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.0" }
 
 [build-dependencies]
 bindgen = "0.69"
@@ -15,10 +17,9 @@ cc = "1.2"
 
 [features]
 # Standard Plugin Features (Opt-in to include)
-std = []
-xtalk = []
-motion = []
-thresholds = []
+xtalk = ["vl53-8x8-types/xtalk"]
+motion = ["vl53-8x8-types/motion"]
+thresholds = ["vl53-8x8-types/thresholds"]
 
 # --- New Feature: Raw Firmware Format ---
 raw-format = []

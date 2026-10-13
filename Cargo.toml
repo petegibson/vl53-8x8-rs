@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "vl53-8x8-types",
     "vl53l8cx-sys",
     "vl53l8cx-driver",
     "vl53l8cx-async",
