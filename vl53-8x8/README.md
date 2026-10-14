@@ -93,10 +93,13 @@ whole driver, following the C sources:
 
 Enabling more than one `targets-N` feature is a compile error. The
 single-target build is checked against the C ULD by the oracle tests; the
-multi-target constants are checked against the header's literal values. The
-`targets-2` build has been compiled for the demo boards but **not yet
-exercised with a real multi-target scene**; treat `targets-2/3/4` as
-experimental until that is done.
+multi-target constants are checked against the header's literal values.
+`targets-2` and `targets-4` have been run on hardware (VL53L5CX, async I2C, and
+VL53L8CX, SPI): the full on-target suites pass, and with a two-surface scene
+(a clear lid ~20 mm above the sensor and a surface beyond it) the firmware
+reports second targets with ST status 13 and first targets with status 12,
+as documented for overlapping returns. See `multi_target_scene_report` in
+`evo-f412re-async/tests/sensor_async.rs`.
 
 ## ST data tables and regeneration
 
