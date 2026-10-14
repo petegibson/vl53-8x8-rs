@@ -166,6 +166,24 @@ mod bus_setup {
 
 use bus_setup::Sensor;
 
+/// `&'static mut Sensor` wrapped in a value type: embedded-test's `#[init]`
+/// state must be a plain value, not a reference. Derefs to the sensor so test
+/// bodies call methods on it directly.
+pub struct SensorRef(pub &'static mut Sensor);
+
+impl core::ops::Deref for SensorRef {
+    type Target = Sensor;
+    fn deref(&self) -> &Sensor {
+        self.0
+    }
+}
+
+impl core::ops::DerefMut for SensorRef {
+    fn deref_mut(&mut self) -> &mut Sensor {
+        self.0
+    }
+}
+
 fn board_init_async() -> Sensor {
     let mut config = embassy_stm32::Config::default();
     {
@@ -206,14 +224,20 @@ fn board_init_async() -> Sensor {
 mod tests {
     use super::*;
 
+    /// The sensor lives in a static and tests receive a `&'static mut`:
+    /// embedded-test allocates one static task pool per async test, sized
+    /// by the test future, so passing the ~3 KB `Sensor` by value into every
+    /// future costs 12x that in RAM and overflows the F401RE's 96 KB with the
+    /// `targets-N` features enabled.
     #[init]
-    fn init() -> Sensor {
-        board_init_async()
+    fn init() -> SensorRef {
+        static SENSOR: static_cell::StaticCell<Sensor> = static_cell::StaticCell::new();
+        SensorRef(SENSOR.init(board_init_async()))
     }
 
     #[test]
     #[timeout(10)]
-    async fn test_set_resolution_while_ranging(mut sensor: Sensor) {
+    async fn test_set_resolution_while_ranging(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -228,7 +252,7 @@ mod tests {
 
     #[test]
     #[timeout(15)]
-    async fn test_reinit_after_reset(mut sensor: Sensor) {
+    async fn test_reinit_after_reset(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res8x8).await.unwrap();
 
@@ -245,7 +269,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_vhv_repeat_count(mut sensor: Sensor) {
+    async fn test_vhv_repeat_count(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_vhv_repeat_count(5).await.unwrap();
@@ -257,7 +281,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_external_sync_pin_enable(mut sensor: Sensor) {
+    async fn test_external_sync_pin_enable(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_external_sync_pin_enable(true).await.unwrap();
@@ -270,7 +294,7 @@ mod tests {
     #[cfg(not(feature = "spi-bus"))]
     #[test]
     #[timeout(15)]
-    async fn test_set_address(mut sensor: Sensor) {
+    async fn test_set_address(mut sensor: SensorRef) {
         let new_address: u8 = 0x35;
         sensor.set_i2c_address(new_address).await.unwrap();
         cortex_m::asm::delay(84_000 * 100);
@@ -279,7 +303,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_wait_for_data_ready_blocking(mut sensor: Sensor) {
+    async fn test_wait_for_data_ready_blocking(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -306,7 +330,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    async fn test_detection_thresholds_enable(mut sensor: Sensor) {
+    async fn test_detection_thresholds_enable(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_detection_thresholds_enable(true).await.unwrap();
@@ -321,7 +345,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    async fn test_detection_thresholds_auto_stop(mut sensor: Sensor) {
+    async fn test_detection_thresholds_auto_stop(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         // Default after init is off.
@@ -337,7 +361,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    async fn test_detection_thresholds(mut sensor: Sensor) {
+    async fn test_detection_thresholds(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         let mut thresholds: [DetectionThreshold; 64] = unsafe { core::mem::zeroed() };
@@ -362,7 +386,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    async fn test_motion_indicator_init(mut sensor: Sensor) {
+    async fn test_motion_indicator_init(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
 
@@ -376,7 +400,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    async fn test_motion_indicator_set_distance(mut sensor: Sensor) {
+    async fn test_motion_indicator_set_distance(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
 
@@ -394,7 +418,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    async fn test_motion_indicator_set_resolution(mut sensor: Sensor) {
+    async fn test_motion_indicator_set_resolution(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         let mut motion_config: MotionConfiguration = unsafe { core::mem::zeroed() };
@@ -411,7 +435,7 @@ mod tests {
     #[cfg(feature = "xtalk")]
     #[test]
     #[timeout(10)]
-    async fn test_xtalk_margin(mut sensor: Sensor) {
+    async fn test_xtalk_margin(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_xtalk_margin(100).await.unwrap();
@@ -424,7 +448,7 @@ mod tests {
     #[cfg(feature = "xtalk")]
     #[test]
     #[timeout(10)]
-    async fn test_caldata_xtalk(mut sensor: Sensor) {
+    async fn test_caldata_xtalk(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         let mut buffer = [0u8; vl53_8x8::XTALK_BUFFER_SIZE];
@@ -449,7 +473,7 @@ mod tests {
     #[cfg(feature = "xtalk")]
     #[test]
     #[timeout(60)]
-    async fn test_calibrate_xtalk_leaves_sensor_usable(mut sensor: Sensor) {
+    async fn test_calibrate_xtalk_leaves_sensor_usable(mut sensor: SensorRef) {
         use vl53_8x8::{Error, FirmwareError};
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
@@ -491,7 +515,7 @@ mod tests {
     #[cfg(feature = "xtalk")]
     #[test]
     #[timeout(15)]
-    async fn test_calibrate_xtalk_rejects_invalid_params(mut sensor: Sensor) {
+    async fn test_calibrate_xtalk_rejects_invalid_params(mut sensor: SensorRef) {
         use vl53_8x8::{Error, FirmwareError};
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res8x8).await.unwrap();

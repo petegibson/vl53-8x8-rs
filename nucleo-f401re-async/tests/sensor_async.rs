@@ -164,6 +164,24 @@ mod bus_setup {
 
 use bus_setup::Sensor;
 
+/// `&'static mut Sensor` wrapped in a value type: embedded-test's `#[init]`
+/// state must be a plain value, not a reference. Derefs to the sensor so test
+/// bodies call methods on it directly.
+pub struct SensorRef(pub &'static mut Sensor);
+
+impl core::ops::Deref for SensorRef {
+    type Target = Sensor;
+    fn deref(&self) -> &Sensor {
+        self.0
+    }
+}
+
+impl core::ops::DerefMut for SensorRef {
+    fn deref_mut(&mut self) -> &mut Sensor {
+        self.0
+    }
+}
+
 fn board_init_async() -> Sensor {
     let mut config = embassy_stm32::Config::default();
     {
@@ -204,14 +222,20 @@ fn board_init_async() -> Sensor {
 mod tests {
     use super::*;
 
+    /// The sensor lives in a static and tests receive a `&'static mut`:
+    /// embedded-test allocates one static task pool per async test, sized
+    /// by the test future, so passing the ~3 KB `Sensor` by value into every
+    /// future costs 12x that in RAM and overflows the F401RE's 96 KB with the
+    /// `targets-N` features enabled.
     #[init]
-    fn init() -> Sensor {
-        board_init_async()
+    fn init() -> SensorRef {
+        static SENSOR: static_cell::StaticCell<Sensor> = static_cell::StaticCell::new();
+        SensorRef(SENSOR.init(board_init_async()))
     }
 
     #[test]
     #[timeout(5)]
-    async fn test_sensor_alive(mut sensor: Sensor) {
+    async fn test_sensor_alive(mut sensor: SensorRef) {
         match sensor.is_alive().await {
             Ok(alive) => defmt::assert!(
                 alive,
@@ -226,13 +250,13 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_init(mut sensor: Sensor) {
+    async fn test_init(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
     }
 
     #[test]
     #[timeout(10)]
-    async fn test_set_resolution(mut sensor: Sensor) {
+    async fn test_set_resolution(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
@@ -244,7 +268,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_4x4(mut sensor: Sensor) {
+    async fn test_ranging_4x4(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -269,7 +293,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_8x8(mut sensor: Sensor) {
+    async fn test_ranging_8x8(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res8x8).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -294,7 +318,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ambient_light(mut sensor: Sensor) {
+    async fn test_ambient_light(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -312,7 +336,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_frequency(mut sensor: Sensor) {
+    async fn test_ranging_frequency(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_ranging_frequency_hz(5).await.unwrap();
@@ -327,7 +351,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_target_order(mut sensor: Sensor) {
+    async fn test_target_order(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_target_order(TargetOrder::Closest).await.unwrap();
@@ -339,7 +363,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_ranging_mode(mut sensor: Sensor) {
+    async fn test_ranging_mode(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_ranging_mode(RangingMode::Continuous).await.unwrap();
@@ -351,7 +375,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_integration_time(mut sensor: Sensor) {
+    async fn test_integration_time(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_integration_time_ms(20).await.unwrap();
@@ -363,7 +387,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_sharpener_percent(mut sensor: Sensor) {
+    async fn test_sharpener_percent(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         sensor.set_sharpener_percent(25).await.unwrap();
@@ -377,7 +401,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    async fn test_power_mode(mut sensor: Sensor) {
+    async fn test_power_mode(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
         assert_eq!(sensor.get_power_mode().await.unwrap(), PowerMode::Wakeup);

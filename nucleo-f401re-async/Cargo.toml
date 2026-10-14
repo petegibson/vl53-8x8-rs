@@ -36,6 +36,7 @@ test = false
 
 [dev-dependencies]
 embedded-test = { version = "0.7.2", features = ["defmt", "embassy-010"] }
+static_cell = "2.1"
 
 [[test]]
 name = "sensor_async"
