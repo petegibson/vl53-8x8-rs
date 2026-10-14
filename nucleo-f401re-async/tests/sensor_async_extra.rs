@@ -510,6 +510,73 @@ mod tests {
         sensor.stop_ranging().await.unwrap();
     }
 
+    /// Xtalk calibration report for a bench with cover glass fitted and a flat
+    /// surface (e.g. the ceiling) in view. Ranges one frame, uses the mean
+    /// valid distance as the calibration target distance, calibrates, then
+    /// ranges again so the before/after frames and the result can be compared
+    /// in the log. Informational: only the sensor staying usable is asserted.
+    #[cfg(feature = "xtalk")]
+    #[test]
+    #[timeout(60)]
+    async fn test_calibrate_xtalk_report(mut sensor: SensorRef) {
+        use vl53_8x8::{Error, FirmwareError};
+        const REFLECTANCE_PERCENT: u8 = 50;
+        const NB_SAMPLES: u8 = 8;
+
+        async fn frame(sensor: &mut SensorRef, label: &str) -> i32 {
+            sensor.start_ranging().await.unwrap();
+            // The first frame after start carries status 6 ("wrap-around not
+            // performed"); sample the second one.
+            sensor.poll_data_ready().await.unwrap();
+            let _ = sensor.get_ranging_data().await.unwrap();
+            sensor.poll_data_ready().await.unwrap();
+            let data = sensor.get_ranging_data().await.unwrap();
+            sensor.stop_ranging().await.unwrap();
+            let (mut sum, mut n) = (0i32, 0i32);
+            for zone in 0..16 {
+                let i = zone * NB_TARGET_PER_ZONE;
+                let (d, s) = (data.distance_mm[i], data.target_status[i]);
+                defmt::info!("{} zone {}: {} mm (status {})", label, zone, d, s);
+                if s == 5 || s == 9 {
+                    sum += d as i32;
+                    n += 1;
+                }
+            }
+            if n > 0 { sum / n } else { 0 }
+        }
+
+        sensor.init().await.unwrap();
+        sensor.set_resolution(Resolution::Res4x4).await.unwrap();
+        sensor.set_ranging_frequency_hz(5).await.unwrap();
+
+        let mean = frame(&mut sensor, "before").await;
+        let distance_mm = mean.clamp(600, 3000) as u16;
+        defmt::info!(
+            "calibrate_xtalk(reflectance {}%, {} samples, {} mm) ...",
+            REFLECTANCE_PERCENT, NB_SAMPLES, distance_mm
+        );
+        match sensor.calibrate_xtalk(REFLECTANCE_PERCENT, NB_SAMPLES, distance_mm).await {
+            Ok(()) => defmt::info!("xtalk calibration: OK"),
+            Err(Error::Firmware(FirmwareError::XtalkFailed)) => {
+                defmt::info!("xtalk calibration: XtalkFailed (cover glass too good / no target)")
+            }
+            Err(e) => {
+                defmt::error!("calibrate_xtalk: {}", defmt::Debug2Format(&e));
+                panic!("calibrate_xtalk failed");
+            }
+        }
+
+        let mut buffer = [0u8; vl53_8x8::XTALK_BUFFER_SIZE];
+        sensor.get_caldata_xtalk(&mut buffer).await.unwrap();
+        defmt::info!("xtalk caldata[0..32]: {=[u8]:#04x}", buffer[..32]);
+        let nonzero = buffer.iter().filter(|&&b| b != 0).count();
+        defmt::info!("xtalk caldata: {} of {} bytes non-zero", nonzero, buffer.len());
+
+        let mean_after = frame(&mut sensor, "after").await;
+        defmt::info!("mean valid distance before {} mm, after {} mm", mean, mean_after);
+        defmt::assert!(mean_after < 8000);
+    }
+
     /// Out-of-range arguments are rejected with `InvalidParam` (the host-side
     /// unit test in `ops.rs` checks that this happens before any bus traffic).
     #[cfg(feature = "xtalk")]
