@@ -25,7 +25,36 @@ use vl53l8cx_uld_sys as sys;
 
 // --- Public Type Re-exports from sys ---
 pub use sys::VL53L8CX_Platform;
+/// One frame of ranging results, as filled in by [`Vl53l8cx::get_ranging_data`].
+///
+/// This is ST's `VL53L8CX_ResultsData`; its fields depend on the `disable-*`
+/// features. Arrays come in two layouts:
+///
+/// * **Per zone** (`ambient_per_spad`, `nb_target_detected`, `nb_spads_enabled`):
+///   64 entries, indexed by zone. In 4x4 mode only the first 16 are used.
+/// * **Per target** (`distance_mm`, `target_status`, `signal_per_spad`,
+///   `range_sigma_mm`, `reflectance`): `64 * NB_TARGET_PER_ZONE` entries,
+///   indexed `zone * NB_TARGET_PER_ZONE + target`. With the default of one
+///   target per zone this collapses to plain zone indexing.
+///
+/// Only the first `nb_target_detected[zone]` targets of a zone are valid;
+/// check `target_status` (5 or 9 means a good range) before using a value.
+///
+/// ```rust,ignore
+/// use vl53l8cx_uld::NB_TARGET_PER_ZONE;
+/// let frame = sensor.get_ranging_data()?;
+/// for zone in 0..16 {
+///     for target in 0..usize::from(frame.nb_target_detected[zone]) {
+///         let i = zone * NB_TARGET_PER_ZONE + target;
+///         let (mm, status) = (frame.distance_mm[i], frame.target_status[i]);
+///     }
+/// }
+/// ```
 pub use sys::VL53L8CX_ResultsData as ResultsData;
+/// Number of targets reported per zone, selected by the `targets-N` features
+/// (default 1). Per-target arrays in [`ResultsData`] are indexed
+/// `zone * NB_TARGET_PER_ZONE + target`.
+pub use sys::VL53L8CX_NB_TARGET_PER_ZONE as NB_TARGET_PER_ZONE;
 pub use sys::{
     Resolution, TargetOrder, RangingMode, PowerMode,
     FirmwareError, Error, NoPin, DEFAULT_ADDRESS, XTALK_BUFFER_SIZE,
@@ -469,7 +498,9 @@ where
         match status { sys::VL53L8CX_STATUS_OK => Ok(is_alive != 0), s => Err(Error::Firmware(s.into())), }
     }
 
-    pub fn get_ranging_data(&mut self) -> Result<sys::VL53L8CX_ResultsData, Error<E>> {
+    /// Read the latest ranging frame. See [`ResultsData`] for the array layout
+    /// (per-target arrays are indexed `zone * NB_TARGET_PER_ZONE + target`).
+    pub fn get_ranging_data(&mut self) -> Result<ResultsData, Error<E>> {
         self.bind_platform();
         let (status, value) = sys::wrappers::get_ranging_data(&mut self.stdev);
         match status { sys::VL53L8CX_STATUS_OK => Ok(value), s => Err(Error::Firmware(s.into())), }
@@ -828,6 +859,39 @@ where
         let ptr = raw_thresholds.as_ptr() as *mut sys::VL53L8CX_DetectionThresholds;
 
         let status = sys::wrappers::set_detection_thresholds(&mut self.stdev, ptr);
+        match status {
+            sys::VL53L8CX_STATUS_OK => Ok(()),
+            s => Err(Error::Firmware(s.into())),
+        }
+    }
+
+    /// Read whether detection-threshold auto-stop is enabled (default: off).
+    ///
+    /// See [`set_detection_thresholds_auto_stop`](Self::set_detection_thresholds_auto_stop).
+    pub fn get_detection_thresholds_auto_stop(&mut self) -> Result<bool, Error<E>> {
+        self.bind_platform();
+        let (status, auto_stop) = sys::wrappers::get_detection_thresholds_auto_stop(&mut self.stdev);
+        match status {
+            sys::VL53L8CX_STATUS_OK => Ok(auto_stop != 0),
+            s => Err(Error::Firmware(s.into())),
+        }
+    }
+
+    /// Enable or disable detection-threshold auto-stop.
+    ///
+    /// In [`RangingMode::Autonomous`] with detection thresholds enabled, the
+    /// sensor only raises INT when a threshold is crossed, and normally does so
+    /// once the measurement completes. With auto-stop enabled the sensor
+    /// instead raises INT and aborts the measurement in progress straight
+    /// away, so the host wakes sooner and the sensor stops ranging on its own.
+    /// After such an interrupt [`stop_ranging`](Self::stop_ranging) must still
+    /// be called for a clean stop before ranging is started again.
+    ///
+    /// Configure this while the sensor is initialised and not ranging.
+    pub fn set_detection_thresholds_auto_stop(&mut self, enabled: bool) -> Result<(), Error<E>> {
+        self.bind_platform();
+        let val = if enabled { 1 } else { 0 };
+        let status = sys::wrappers::set_detection_thresholds_auto_stop(&mut self.stdev, val);
         match status {
             sys::VL53L8CX_STATUS_OK => Ok(()),
             s => Err(Error::Firmware(s.into())),

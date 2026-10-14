@@ -3,13 +3,30 @@
 
 use defmt_rtt as _;
 
-use vl53l8cx_uld::{PowerMode, RangingMode, Resolution, TargetOrder};
+use vl53l8cx_uld::{
+    PowerMode, RangingMode, Resolution, ResultsData, TargetOrder, NB_TARGET_PER_ZONE,
+};
 
 #[cfg(feature = "thresholds")]
 use vl53l8cx_uld::{
     DetectionThreshold, MotionConfiguration, ThresholdMeasurement, ThresholdOperation,
     ThresholdType,
 };
+
+/// Assert that the first (closest/strongest) target of each of the first
+/// `zones` zones has a plausible distance. Per-target arrays are laid out
+/// `zone * NB_TARGET_PER_ZONE + target`, so this works for any `targets-N`.
+fn assert_zone_distances(data: &ResultsData, zones: usize) {
+    for zone in 0..zones {
+        let d = data.distance_mm[zone * NB_TARGET_PER_ZONE];
+        defmt::assert!(
+            d > 10 && d < 4000,
+            "zone {} distance {} mm out of range",
+            zone,
+            d
+        );
+    }
+}
 
 #[embedded_test::tests]
 mod tests {
@@ -69,15 +86,8 @@ mod tests {
         }
 
         let data = sensor.get_ranging_data().unwrap();
-        // All 4x4 zones should read between 10 mm and 2000 mm
-        for (i, &d) in data.distance_mm[..16].iter().enumerate() {
-            defmt::assert!(
-                d > 10 && d < 4000,
-                "zone {} distance {} mm out of range",
-                i,
-                d
-            );
-        }
+        // All 4x4 zones should read between 10 mm and 4000 mm
+        assert_zone_distances(&data, 16);
 
         sensor.stop_ranging().unwrap();
     }
@@ -98,15 +108,8 @@ mod tests {
         }
 
         let data = sensor.get_ranging_data().unwrap();
-        // All 4x4 zones should read between 10 mm and 2000 mm
-        for (i, &d) in data.distance_mm[..64].iter().enumerate() {
-            defmt::assert!(
-                d > 10 && d < 4000,
-                "zone {} distance {} mm out of range",
-                i,
-                d
-            );
-        }
+        // All 8x8 zones should read between 10 mm and 4000 mm
+        assert_zone_distances(&data, 64);
 
         sensor.stop_ranging().unwrap();
     }
@@ -293,14 +296,7 @@ mod tests {
         sensor.wait_for_data_ready_blocking().unwrap();
 
         let data = sensor.get_ranging_data().unwrap();
-        for (i, &d) in data.distance_mm[..16].iter().enumerate() {
-            defmt::assert!(
-                d > 10 && d < 4000,
-                "zone {} distance {} mm out of range",
-                i,
-                d
-            );
-        }
+        assert_zone_distances(&data, 16);
 
         sensor.stop_ranging().unwrap();
     }
@@ -316,6 +312,22 @@ mod tests {
 
         sensor.set_detection_thresholds_enable(false).unwrap();
         defmt::assert!(!sensor.get_detection_thresholds_enable().unwrap());
+    }
+
+    #[cfg(feature = "thresholds")]
+    #[test]
+    #[timeout(10)]
+    fn test_detection_thresholds_auto_stop(mut sensor: nucleo_f401re::Sensor) {
+        sensor.init().unwrap();
+
+        // Default after init is off.
+        defmt::assert!(!sensor.get_detection_thresholds_auto_stop().unwrap());
+
+        sensor.set_detection_thresholds_auto_stop(true).unwrap();
+        defmt::assert!(sensor.get_detection_thresholds_auto_stop().unwrap());
+
+        sensor.set_detection_thresholds_auto_stop(false).unwrap();
+        defmt::assert!(!sensor.get_detection_thresholds_auto_stop().unwrap());
     }
 
     #[cfg(feature = "thresholds")]

@@ -159,6 +159,18 @@ pub fn set_xtalk_margin(config: &mut Cfg, margin: u32) -> u8 {
 }
 
 #[cfg(feature = "thresholds")]
+pub fn get_detection_thresholds_auto_stop(config: &mut Cfg) -> (u8, u8) {
+    let mut auto_stop: u8 = 0;
+    let status = unsafe { crate::vl53l8cx_get_detection_thresholds_auto_stop(config, &mut auto_stop) };
+    (status, auto_stop)
+}
+
+#[cfg(feature = "thresholds")]
+pub fn set_detection_thresholds_auto_stop(config: &mut Cfg, auto_stop: u8) -> u8 {
+    unsafe { crate::vl53l8cx_set_detection_thresholds_auto_stop(config, auto_stop) }
+}
+
+#[cfg(feature = "thresholds")]
 pub fn get_detection_thresholds(config: &mut Cfg, thresholds: *mut crate::VL53L8CX_DetectionThresholds) -> u8 {
     unsafe { crate::vl53l8cx_get_detection_thresholds(config, thresholds) }
 }

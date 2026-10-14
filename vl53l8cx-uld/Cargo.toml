@@ -26,10 +26,13 @@ motion = ["vl53l8cx-uld-sys/motion"]
 thresholds = ["vl53l8cx-uld-sys/thresholds"]
 raw-format = ["vl53l8cx-uld-sys/raw-format"]
 
-targets-1 = []
-targets-2 = []
-targets-3 = []
-targets-4 = []
+# Targets per zone (`VL53L8CX_NB_TARGET_PER_ZONE`): exactly one may be enabled,
+# `targets-1` is the default. Per-target result arrays then hold `64 * N`
+# entries indexed `zone * NB_TARGET_PER_ZONE + target`.
+targets-1 = ["vl53l8cx-uld-sys/targets-1"]
+targets-2 = ["vl53l8cx-uld-sys/targets-2"]
+targets-3 = ["vl53l8cx-uld-sys/targets-3"]
+targets-4 = ["vl53l8cx-uld-sys/targets-4"]
 
 # Output disablement features for size optimization (opt-in to DISABLE/remove)
 disable-ambient = ["vl53l8cx-uld-sys/disable-ambient"]

@@ -26,6 +26,11 @@ spi-bus = ["dep:embedded-hal-bus", "dep:panic-probe"]
 xtalk = ["vl53l8cx-uld/xtalk"]
 motion = ["vl53l8cx-uld/motion"]
 thresholds = ["vl53l8cx-uld/thresholds"]
+# Targets per zone; enable at most one. Tests index results with
+# `zone * NB_TARGET_PER_ZONE + target`.
+targets-2 = ["vl53l8cx-uld/targets-2"]
+targets-3 = ["vl53l8cx-uld/targets-3"]
+targets-4 = ["vl53l8cx-uld/targets-4"]
 
 [lib]
 test = false

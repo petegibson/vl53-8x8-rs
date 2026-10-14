@@ -13,17 +13,59 @@ fn main() {
     let mut c_sources = vec![driver_dir.join("src").join("vl53l8cx_api.c")];
     let mut cc_build = cc::Build::new();
 
-    // Determine the number of targets based on active features.
-    let mut nb_targets = "1"; // Default
-    if env::var("CARGO_FEATURE_TARGETS_4").is_ok() {
-        nb_targets = "4";
-    } else if env::var("CARGO_FEATURE_TARGETS_3").is_ok() {
-        nb_targets = "3";
-    } else if env::var("CARGO_FEATURE_TARGETS_2").is_ok() {
-        nb_targets = "2";
-    }
-    // Note: If multiple `targets-*` features are enabled, the highest number will be used.
-    // For true mutual exclusion, a more complex check could be added here to panic the build.
+    // Determine VL53L8CX_NB_TARGET_PER_ZONE from the `targets-N` features.
+    // Exactly one may be enabled; `targets-1` is the same as the default.
+    // Cargo unions features across the dependency graph, so two crates asking
+    // for different values is a real conflict, not something to resolve by
+    // picking the highest: the C struct layout would silently change for one
+    // of them.
+    let selected: Vec<(&str, u8)> = [
+        ("targets-1", 1u8),
+        ("targets-2", 2),
+        ("targets-3", 3),
+        ("targets-4", 4),
+    ]
+    .into_iter()
+    .filter(|(feature, _)| {
+        env::var(format!(
+            "CARGO_FEATURE_{}",
+            feature.to_uppercase().replace('-', "_")
+        ))
+        .is_ok()
+    })
+    .collect();
+    let nb_targets: u8 = match selected.as_slice() {
+        [] => 1,
+        [(_, n)] => *n,
+        many => {
+            let names: Vec<&str> = many.iter().map(|(f, _)| *f).collect();
+            panic!(
+                "vl53l8cx-uld-sys: conflicting `targets-N` features enabled: {}. \
+                 VL53L8CX_NB_TARGET_PER_ZONE can only have one value; enable exactly one of \
+                 `targets-1`, `targets-2`, `targets-3`, `targets-4` (or none for the default of 1) \
+                 across the whole dependency graph.",
+                names.join(", ")
+            );
+        }
+    };
+    let nb_targets = nb_targets.to_string();
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    // Bindgen does not emit macros passed on the command line, so publish the
+    // selected value as a Rust constant next to the generated bindings.
+    std::fs::write(
+        out_path.join("nb_targets.rs"),
+        format!(
+            "/// Number of targets reported per zone (`VL53L8CX_NB_TARGET_PER_ZONE`),\n\
+             /// selected by the `targets-N` cargo features (default 1).\n\
+             ///\n\
+             /// Per-target arrays in [`VL53L8CX_ResultsData`] (`distance_mm`, `target_status`,\n\
+             /// `signal_per_spad`, `range_sigma_mm`, `reflectance`) hold `64 * N` entries,\n\
+             /// indexed `zone * VL53L8CX_NB_TARGET_PER_ZONE + target`.\n\
+             pub const VL53L8CX_NB_TARGET_PER_ZONE: usize = {};\n",
+            nb_targets
+        ),
+    )
+    .expect("Couldn't write nb_targets.rs");
 
     let mut bindgen_builder = bindgen::Builder::default();
 
@@ -182,7 +224,7 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
         // Suppress signed/unsigned comparison warning in ST's SwapBuffer macro
         .flag("-Wno-sign-compare")
         // Configure driver settings.
-        .define("VL53L8CX_NB_TARGET_PER_ZONE", nb_targets)
+        .define("VL53L8CX_NB_TARGET_PER_ZONE", nb_targets.as_str())
         // This tells the C driver to use the high-level platform functions.
         .define("USE_ULP_PLATFORM", "1")
         .compile("vl53l8cx_uld");
@@ -218,7 +260,6 @@ if env::var("CARGO_FEATURE_DISABLE_MOTION_INDICATOR_OUTPUT").is_ok() {
         .expect("Unable to generate bindings");
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");

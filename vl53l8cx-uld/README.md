@@ -52,10 +52,20 @@ sensor.start_ranging()?;
 loop {
     if sensor.check_data_ready()? {                 // or wait_for_data_ready_blocking() with INT
         let frame = sensor.get_ranging_data()?;
-        // frame.distance_mm: [i16; 64], 8x8 layout; first 16 entries used in 4x4 mode
+        // frame.distance_mm: [i16; 64 * NB_TARGET_PER_ZONE], indexed
+        // zone * NB_TARGET_PER_ZONE + target; first 16 zones used in 4x4 mode
     }
 }
 ```
+
+`ResultsData` (ST's `VL53L8CX_ResultsData`) has two array layouts. Per-zone
+arrays (`ambient_per_spad`, `nb_target_detected`, `nb_spads_enabled`) have 64
+entries indexed by zone. Per-target arrays (`distance_mm`, `target_status`,
+`signal_per_spad`, `range_sigma_mm`, `reflectance`) have
+`64 * NB_TARGET_PER_ZONE` entries indexed `zone * NB_TARGET_PER_ZONE + target`,
+where `vl53l8cx_uld::NB_TARGET_PER_ZONE` is 1 by default and set by the
+`targets-N` features. Only the first `nb_target_detected[zone]` targets of a
+zone hold data; `target_status` 5 or 9 marks a valid range.
 
 All methods return `Result<_, Error<BusError>>`. Configuration setters and
 getters cover resolution, frequency, ranging mode, integration time, sharpener,
@@ -67,11 +77,16 @@ target order, power mode, VHV repeat count and the external sync pin.
 | ------------------------------------- | ------------------------------------------------------------------- |
 | `xtalk`                               | Crosstalk calibration (`calibrate_xtalk`, `get/set_caldata_xtalk`, margin) |
 | `motion`                              | Motion indicator plugin (`motion_indicator_*`)                      |
-| `thresholds`                          | Detection thresholds (`get/set_detection_thresholds`, enable)       |
+| `thresholds`                          | Detection thresholds (`get/set_detection_thresholds`, enable, auto-stop) |
 | `raw-format`                          | Return fixed-point sensor units instead of mm / kcps / %            |
 | `disable-*`                           | Drop a result field from `ResultsData` (forwarded to the C build)   |
 | `defmt`                               | `defmt` trace logging of bus traffic                                |
-| `targets-2`, `targets-3`, `targets-4` | Declared for parity with `vl53-8x8` but **not currently forwarded** to the C build; the ULD is compiled with one target per zone |
+| `targets-1` .. `targets-4`            | Set `VL53L8CX_NB_TARGET_PER_ZONE` for the C build and bindings (default 1). Enable **at most one**; two at once is a build error. Per-target result arrays grow to `64 * N` entries indexed `zone * NB_TARGET_PER_ZONE + target` |
+
+With `thresholds`, `set_detection_thresholds_auto_stop(true)` makes the sensor
+raise INT and abort the measurement in progress as soon as a threshold is
+crossed (autonomous mode), instead of after the measurement completes; call
+`stop_ranging` afterwards for a clean stop.
 
 ## Hardware verification
 

@@ -31,6 +31,20 @@ thresholds = ["vl53-8x8-types/thresholds"]
 # --- New Feature: Raw Firmware Format ---
 raw-format = []
 
+# --- Targets per zone ---
+# Select `VL53L8CX_NB_TARGET_PER_ZONE` for the C build and the bindgen pass.
+# The default (no feature, or `targets-1`) is one target per zone. Enabling
+# more than one `targets-N` feature is a build error (`build.rs` panics):
+# the macro can only take a single value, and cargo unions features across
+# the dependency graph, so a silent "highest wins" rule would let one crate
+# change the `VL53L8CX_ResultsData` layout another crate was written for.
+# Per-target result arrays (`distance_mm`, `target_status`, ...) then hold
+# `64 * N` entries indexed `zone * N + target`.
+targets-1 = []
+targets-2 = []
+targets-3 = []
+targets-4 = []
+
 # --- Output Disablement Features for Size Optimization (Opt-in to DISABLE/remove) ---
 disable-ambient = []
 disable-spads = []

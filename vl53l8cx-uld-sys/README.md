@@ -71,10 +71,13 @@ the bindgen pass so the Rust and C struct layouts stay in step.
 | `disable-target-status`           | `VL53L8CX_DISABLE_TARGET_STATUS`        |
 | `disable-reflectance`             | `VL53L8CX_DISABLE_REFLECTANCE_PERCENT`  |
 | `disable-motion-indicator-output` | `VL53L8CX_DISABLE_MOTION_INDICATOR`     |
+| `targets-1` .. `targets-4`        | `VL53L8CX_NB_TARGET_PER_ZONE=N` (default 1; at most one, else `build.rs` panics) |
 
 Without `motion` the `motion_indicator` result field is removed from the C
 struct as well, so `VL53L8CX_ResultsData` is only a few hundred bytes.
-`VL53L8CX_NB_TARGET_PER_ZONE` is 1.
+The selected target count is exported as the Rust constant
+`VL53L8CX_NB_TARGET_PER_ZONE`; per-target result arrays hold `64 * N` entries
+indexed `zone * N + target`.
 
 ## Hardware verification
 
