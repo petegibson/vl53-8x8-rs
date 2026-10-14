@@ -291,6 +291,55 @@ mod tests {
         sensor.stop_ranging().await.unwrap();
     }
 
+    /// Multi-target scene check (only built with a `targets-N` feature, N > 1).
+    ///
+    /// Requires a scene with two surfaces in the field of view, e.g. a clear
+    /// plastic lid ~15-20 mm above the shield and the ceiling beyond it. Logs,
+    /// per zone, the firmware's detected-target count and the first two
+    /// targets' distance/status, and asserts that at least one zone in one of
+    /// the frames reported two or more targets.
+    #[cfg(any(feature = "targets-2", feature = "targets-3", feature = "targets-4"))]
+    #[test]
+    #[timeout(20)]
+    async fn test_multi_target_scene_report(mut sensor: SensorRef) {
+        const FRAMES: usize = 5;
+        sensor.init().await.unwrap();
+        sensor.set_resolution(Resolution::Res4x4).await.unwrap();
+        sensor.set_ranging_frequency_hz(5).await.unwrap();
+        sensor.start_ranging().await.unwrap();
+
+        let mut zones_with_two = 0u32;
+        for frame in 0..FRAMES {
+            sensor.poll_data_ready().await.unwrap();
+            let data = sensor.get_ranging_data().await.unwrap();
+            for zone in 0..16 {
+                let n = data.nb_target_detected[zone];
+                let base = zone * NB_TARGET_PER_ZONE;
+                let (d0, s0) = (data.distance_mm[base], data.target_status[base]);
+                let (d1, s1) = (data.distance_mm[base + 1], data.target_status[base + 1]);
+                defmt::assert!(d0 < 8000 && d1 < 8000, "zone {} implausible distance", zone);
+                if frame == FRAMES - 1 {
+                    defmt::info!(
+                        "zone {}: {} target(s)  t0 {} mm (status {})  t1 {} mm (status {})",
+                        zone, n, d0, s0, d1, s1
+                    );
+                }
+                if n >= 2 {
+                    zones_with_two += 1;
+                }
+            }
+        }
+        sensor.stop_ranging().await.unwrap();
+        defmt::info!(
+            "{} zone-frames with >= 2 targets over {} frames (N = {})",
+            zones_with_two, FRAMES, NB_TARGET_PER_ZONE
+        );
+        defmt::assert!(
+            zones_with_two > 0,
+            "no zone reported a second target; is a two-surface scene in front of the sensor?"
+        );
+    }
+
     #[test]
     #[timeout(10)]
     async fn test_ranging_8x8(mut sensor: SensorRef) {
