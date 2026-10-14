@@ -7,11 +7,14 @@ use crate::consts::*;
 use crate::results::ResultsData;
 use crate::state::State;
 use crate::uld_data::{DEFAULT_CONFIGURATION, DEFAULT_XTALK, GET_NVM_CMD};
+#[cfg(feature = "xtalk")]
+use crate::uld_data::{CALIBRATE_XTALK, FW_NBTAR_XTALK_INDEX};
 use vl53_8x8_types::{
-    Error, FirmwareError, VL53L8CX_RESOLUTION_4X4, VL53L8CX_STATUS_ERROR, XTALK_BUFFER_SIZE,
+    Error, FirmwareError, VL53L8CX_RESOLUTION_4X4, VL53L8CX_RESOLUTION_8X8,
+    VL53L8CX_STATUS_ERROR, XTALK_BUFFER_SIZE,
 };
-#[cfg(not(feature = "raw-format"))]
-use vl53_8x8_types::VL53L8CX_RESOLUTION_8X8;
+#[cfg(feature = "xtalk")]
+use vl53_8x8_types::VL53L8CX_GET_XTALK_CMD;
 
 /// L5-only DCI index for the glare filter (absent on the VL53L8CX).
 const VL53L5CX_GLARE_FILTER: u16 = 0xE108;
@@ -403,6 +406,133 @@ pub async fn send_xtalk_data<BUS: VlBusAsync, D: DelayNs>(
     Ok(())
 }
 
+/// Upload the default configuration (`p_dev->default_configuration` in the
+/// ULD, written to 0x2C34 by `vl53l8cx_init` and again by
+/// `vl53l8cx_calibrate_xtalk` to reset the sensor after a calibration).
+///
+/// The shared base is the L8 blob; the variant config overlay (5 bytes for L5)
+/// is applied into `temp_buffer` before sending, then the target-count overlay
+/// (byte 107, `VL53L8CX_FW_NBTAR_RANGING`, only non-empty for
+/// `targets-2/3/4`). The two never overlap.
+pub async fn send_default_configuration<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    stdev: &mut State,
+    info: &SensorInfo,
+) -> Result<(), Error<BUS::Error>> {
+    let cfg_len = VL53L8CX_CONFIGURATION_SIZE as usize;
+    stdev.temp_buffer[..cfg_len].copy_from_slice(&DEFAULT_CONFIGURATION);
+    for &(off, val) in info.config_patch {
+        stdev.temp_buffer[off] = val;
+    }
+    for &(off, val) in NB_TARGET_CONFIG_PATCH {
+        stdev.temp_buffer[off] = val;
+    }
+    bus.write(addr, 0x2C34, &stdev.temp_buffer[..cfg_len])
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        4,
+        1,
+        VL53L8CX_UI_CMD_STATUS,
+        0xFF,
+        0x03,
+    )
+    .await
+}
+
+/// Current resolution as the ULD encodes it (`vl53l8cx_get_resolution`):
+/// the product of the two zone-grid dimensions in `VL53L8CX_DCI_ZONE_CONFIG`,
+/// i.e. `VL53L8CX_RESOLUTION_4X4` (16) or `VL53L8CX_RESOLUTION_8X8` (64).
+pub async fn get_resolution<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+) -> Result<u8, Error<BUS::Error>> {
+    let mut buf = [0u8; 8];
+    dci_read(
+        bus,
+        addr,
+        delay,
+        temp_buf,
+        &mut buf,
+        VL53L8CX_DCI_ZONE_CONFIG as u32,
+        8,
+    )
+    .await?;
+    Ok(buf[0] * buf[1])
+}
+
+/// Set the resolution (`vl53l8cx_set_resolution`): reprogram the DSS and
+/// zone configuration for the new grid, then re-send the offset and xtalk
+/// calibration data, which are resolution dependent. `resolution` is
+/// `VL53L8CX_RESOLUTION_4X4` or `VL53L8CX_RESOLUTION_8X8`; anything else is
+/// `InvalidParam`, as in the ULD's `default:` case.
+///
+/// Because it re-sends `State::xtalk_data`, this is also how a new crosstalk
+/// shape (from `set_caldata_xtalk` or `calibrate_xtalk`) reaches the sensor.
+pub async fn set_resolution<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    stdev: &mut State,
+    resolution: u8,
+) -> Result<(), Error<BUS::Error>> {
+    // Local buffers for the DCI round-trips: never `stdev.offset_data`, which
+    // holds the calibration `send_offset_data` needs below.
+    let mut dss_buf = [0u8; 16];
+    let mut zone_buf = [0u8; 8];
+    let (dss, zone): ([u8; 3], [u8; 4]) = match resolution {
+        VL53L8CX_RESOLUTION_4X4 => ([64, 64, 4], [4, 4, 8, 8]),
+        VL53L8CX_RESOLUTION_8X8 => ([16, 16, 1], [8, 8, 4, 4]),
+        _ => return Err(Error::Firmware(FirmwareError::InvalidParam)),
+    };
+
+    dci_read(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut dss_buf,
+        VL53L8CX_DCI_DSS_CONFIG as u32, 16,
+    )
+    .await?;
+    dss_buf[0x04] = dss[0];
+    dss_buf[0x06] = dss[1];
+    dss_buf[0x09] = dss[2];
+    dci_write(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut dss_buf,
+        VL53L8CX_DCI_DSS_CONFIG as u32, 16,
+    )
+    .await?;
+
+    dci_read(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut zone_buf,
+        VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+    )
+    .await?;
+    zone_buf[0x00] = zone[0];
+    zone_buf[0x01] = zone[1];
+    zone_buf[0x04] = zone[2];
+    zone_buf[0x05] = zone[3];
+    dci_write(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut zone_buf,
+        VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+    )
+    .await?;
+
+    send_offset_data(
+        bus, addr, delay, &mut stdev.temp_buffer, &stdev.offset_data, resolution,
+    )
+    .await?;
+    send_xtalk_data(
+        bus, addr, delay, &mut stdev.temp_buffer, &stdev.xtalk_data, resolution,
+    )
+    .await
+}
+
 /// Full sensor initialization sequence (translates vl53l8cx_init).
 pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
@@ -619,33 +749,8 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     )
     .await?;
 
-    // Send default configuration. The shared base is the L8 blob; apply the
-    // variant config overlay (5 bytes for L5) into temp_buffer before sending,
-    // then the target-count overlay (byte 107, `VL53L8CX_FW_NBTAR_RANGING`,
-    // only non-empty for `targets-2/3/4`). The two never overlap.
-    let cfg_len = VL53L8CX_CONFIGURATION_SIZE as usize;
-    stdev.temp_buffer[..cfg_len].copy_from_slice(&DEFAULT_CONFIGURATION);
-    for &(off, val) in info.config_patch {
-        stdev.temp_buffer[off] = val;
-    }
-    for &(off, val) in NB_TARGET_CONFIG_PATCH {
-        stdev.temp_buffer[off] = val;
-    }
-    bus.write(addr, 0x2C34, &stdev.temp_buffer[..cfg_len])
-        .await
-        .map_err(Error::Bus)?;
-    poll_for_answer(
-        bus,
-        addr,
-        delay,
-        &mut stdev.temp_buffer,
-        4,
-        1,
-        VL53L8CX_UI_CMD_STATUS,
-        0xFF,
-        0x03,
-    )
-    .await?;
+    // Send default configuration.
+    send_default_configuration(bus, addr, delay, stdev, info).await?;
 
     // DCI pipe control
     let mut pipe_ctrl: [u8; 4] = [NB_TARGET_PER_ZONE, 0x00, 0x01, 0x00];
@@ -1285,6 +1390,278 @@ pub async fn set_detection_thresholds_auto_stop<BUS: VlBusAsync, D: DelayNs>(
     Ok(())
 }
 
+// --- Xtalk plugin (`vl53l8cx_plugin_xtalk.c`) ------------------------------------
+
+/// Read the sensor's current crosstalk shape into `out` (the shared tail of
+/// `vl53l8cx_get_caldata_xtalk` and `vl53l8cx_calibrate_xtalk`): send
+/// `VL53L8CX_GET_XTALK_CMD` at 0x2FB8, wait for it, read the 780-byte answer
+/// from `VL53L8CX_UI_CMD_START`, and keep bytes 8..776 followed by the fixed
+/// 8-byte footer. `out` must hold `XTALK_BUFFER_SIZE` bytes. The caller is
+/// responsible for the resolution being 8x8, as the ULD callers are.
+#[cfg(feature = "xtalk")]
+pub async fn fetch_xtalk_data<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+    out: &mut [u8],
+) -> Result<(), Error<BUS::Error>> {
+    bus.write(addr, 0x2FB8, &VL53L8CX_GET_XTALK_CMD)
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus, addr, delay, temp_buf, 4, 1, VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+    )
+    .await?;
+    bus.read(
+        addr,
+        VL53L8CX_UI_CMD_START,
+        &mut temp_buf[..XTALK_BUFFER_SIZE + 4],
+    )
+    .await
+    .map_err(Error::Bus)?;
+
+    const FOOTER: [u8; 8] = [0x00, 0x00, 0x00, 0x0F, 0x00, 0x01, 0x03, 0x04];
+    out[..XTALK_BUFFER_SIZE - 8].copy_from_slice(&temp_buf[8..XTALK_BUFFER_SIZE]);
+    out[XTALK_BUFFER_SIZE - 8..XTALK_BUFFER_SIZE].copy_from_slice(&FOOTER);
+    Ok(())
+}
+
+/// Argument check of `vl53l8cx_calibrate_xtalk`: target reflectance 1..=99 %,
+/// 1..=16 samples, target distance 600..=3000 mm.
+#[cfg(feature = "xtalk")]
+pub const fn xtalk_params_valid(reflectance_percent: u8, nb_samples: u8, distance_mm: u16) -> bool {
+    reflectance_percent >= 1
+        && reflectance_percent <= 99
+        && nb_samples >= 1
+        && nb_samples <= 16
+        && distance_mm >= 600
+        && distance_mm <= 3000
+}
+
+/// Port of the plugin's private `_vl53l8cx_program_output_config`: program the
+/// output list the firmware produces during a crosstalk calibration (17
+/// blocks, all enabled) and compute `State::data_read_size` for it, the same
+/// way `start_ranging` does for a ranging session.
+#[cfg(feature = "xtalk")]
+async fn program_xtalk_output_config<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    stdev: &mut State,
+) -> Result<(), Error<BUS::Error>> {
+    let resolution = get_resolution(bus, addr, delay, &mut stdev.temp_buffer).await? as u32;
+    stdev.data_read_size = 0;
+
+    // Enable mandatory output (meta and common data)
+    let output_bh_enable: [u32; 4] = [0x0001FFFF, 0x00000000, 0x00000000, 0xC0000000];
+
+    // Send addresses of possible output (`output[]` in the C; block headers,
+    // idx(16) | size(12) | type(4), little-endian).
+    let mut output: [u32; 17] = [
+        0x0000000D, 0x54000040, 0x9FD800C0, 0x9FE40140, 0x9FF80040, 0x9FFC0404,
+        0xA0FC0100, 0xA10C0100, 0xA11C00C0, 0xA1280902, 0xA2480040, 0xA24C0081,
+        0xA2540081, 0xA25C0081, 0xA2640081, 0xA26C0084, 0xA28C0082,
+    ];
+
+    // Update data size
+    for i in 0..output.len() {
+        let bh = output[i];
+        if bh == 0 || (output_bh_enable[i / 32] & (1 << (i % 32))) == 0 {
+            continue;
+        }
+        let bh_type = bh & 0x0F;
+        let bh_size = (bh >> 4) & 0x0FFF;
+        let bh_idx = (bh >> 16) as u16;
+        if bh_type >= 1 && bh_type < 0x0D {
+            let sz = if bh_idx >= 0x54D0 && bh_idx < (0x54D0 + 960) {
+                resolution
+            } else {
+                resolution * NB_TARGET_PER_ZONE as u32
+            };
+            output[i] = (bh_idx as u32) << 16 | (sz & 0x0FFF) << 4 | bh_type;
+            stdev.data_read_size += bh_type * sz;
+        } else {
+            stdev.data_read_size += bh_size;
+        }
+        stdev.data_read_size += 4;
+    }
+    stdev.data_read_size += 24;
+
+    let mut output_bytes = [0u8; 17 * 4];
+    for (i, val) in output.iter().enumerate() {
+        output_bytes[i * 4..(i + 1) * 4].copy_from_slice(&val.to_le_bytes());
+    }
+    dci_write(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut output_bytes,
+        VL53L8CX_DCI_OUTPUT_LIST as u32, 17 * 4,
+    )
+    .await?;
+
+    // header_config = { data_read_size, nb_outputs + 1 }
+    let mut header_config = [0u8; 8];
+    header_config[..4].copy_from_slice(&stdev.data_read_size.to_le_bytes());
+    header_config[4..].copy_from_slice(&(output.len() as u32 + 1).to_le_bytes());
+    dci_write(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut header_config,
+        VL53L8CX_DCI_OUTPUT_CONFIG as u32, 8,
+    )
+    .await?;
+
+    let mut enables_bytes = [0u8; 16];
+    for (i, val) in output_bh_enable.iter().enumerate() {
+        enables_bytes[i * 4..(i + 1) * 4].copy_from_slice(&val.to_le_bytes());
+    }
+    dci_write(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut enables_bytes,
+        VL53L8CX_DCI_OUTPUT_ENABLES as u32, 16,
+    )
+    .await
+}
+
+/// Run a crosstalk calibration: port of `vl53l8cx_calibrate_xtalk`
+/// (`vl53l8cx_plugin_xtalk.c`), identical in the VL53L5CX ULD apart from the
+/// two command-table bytes carried by `SensorInfo::calibrate_xtalk_patch`.
+///
+/// Sequence, as in the C: read the resolution and switch to 8x8; upload the
+/// `CALIBRATE_XTALK` command table at 0x2C28 (variant overlay and, for
+/// `targets-N`, the `FW_NBTAR_XTALK` byte applied); write the target distance
+/// (x4), reflectance (x16) and sample count into `VL53L8CX_DCI_CAL_CFG`;
+/// program the calibration output list; start the session and wait up to
+/// 400 x 50 ms for the firmware to finish; read the resulting shape into
+/// `State::xtalk_data`; reset the sensor with the default configuration; and
+/// restore the resolution, which re-sends the (new) `xtalk_data`.
+///
+/// Split with the caller: the ULD brackets this body with a save and restore
+/// of ranging frequency, integration time, sharpener, target order, xtalk
+/// margin and ranging mode through its public getters/setters. Those are
+/// `Sensor` methods here, so `Sensor::calibrate_xtalk` does that bracket
+/// around this function, in the ULD's order (resolution is restored first,
+/// inside this function, then the six scalars).
+///
+/// Two deliberate divergences from the C's `status |=` accumulation:
+/// arguments are validated before any bus traffic (the ULD reads the
+/// configuration first and, on bad arguments, still runs the readback and
+/// restore), and a calibration that never completes is reported as
+/// `FirmwareError::Timeout` rather than the generic `VL53L8CX_STATUS_ERROR`.
+/// `FirmwareError::XtalkFailed` means the firmware found the coverglass too
+/// good to calibrate (the ULD then reloads the default shape, as done here).
+/// In both failure cases the reset and restore still run, so the sensor is
+/// left configured as before.
+#[cfg(feature = "xtalk")]
+pub async fn calibrate_xtalk<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    stdev: &mut State,
+    info: &SensorInfo,
+    reflectance_percent: u8,
+    nb_samples: u8,
+    distance_mm: u16,
+) -> Result<(), Error<BUS::Error>> {
+    if !xtalk_params_valid(reflectance_percent, nb_samples, distance_mm) {
+        return Err(Error::Firmware(FirmwareError::InvalidParam));
+    }
+
+    // Get initial configuration (the resolution part; see the doc comment).
+    let resolution = get_resolution(bus, addr, delay, &mut stdev.temp_buffer).await?;
+    set_resolution(bus, addr, delay, stdev, VL53L8CX_RESOLUTION_8X8).await?;
+
+    // Send Xtalk calibration buffer: the shared (L8) table with the variant
+    // overlay, then the target-count byte (`VL53L8CX_FW_NBTAR_XTALK`, which
+    // the C resolves at compile time). The two never overlap.
+    let cmd_len = CALIBRATE_XTALK.len();
+    stdev.temp_buffer[..cmd_len].copy_from_slice(&CALIBRATE_XTALK);
+    for &(off, val) in info.calibrate_xtalk_patch {
+        stdev.temp_buffer[off] = val;
+    }
+    if NB_TARGET_PER_ZONE != 1 {
+        stdev.temp_buffer[FW_NBTAR_XTALK_INDEX] = NB_TARGET_PER_ZONE;
+    }
+    bus.write(addr, 0x2C28, &stdev.temp_buffer[..cmd_len])
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus, addr, delay, &mut stdev.temp_buffer, 4, 1, VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+    )
+    .await?;
+
+    // Format input arguments and update the required fields of the
+    // 8-byte calibration config block.
+    let distance = (distance_mm * 4).to_le_bytes();
+    let reflectance = (reflectance_percent as u16 * 16).to_le_bytes();
+    let mut cal_cfg = [0u8; 8];
+    dci_replace(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut cal_cfg,
+        VL53L8CX_DCI_CAL_CFG as u32, 8, &distance, 0x00,
+    )
+    .await?;
+    dci_replace(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut cal_cfg,
+        VL53L8CX_DCI_CAL_CFG as u32, 8, &reflectance, 0x02,
+    )
+    .await?;
+    dci_replace(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut cal_cfg,
+        VL53L8CX_DCI_CAL_CFG as u32, 8, &[nb_samples], 0x04,
+    )
+    .await?;
+
+    // Program output for Xtalk calibration
+    program_xtalk_output_config(bus, addr, delay, stdev).await?;
+
+    // Start ranging session (no xshut bypass, unlike `start_ranging`; the
+    // firmware stops by itself when the calibration is done).
+    let cmd: [u8; 4] = [0x00, 0x03, 0x00, 0x00];
+    bus.write(addr, VL53L8CX_UI_CMD_END - 3, &cmd)
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus, addr, delay, &mut stdev.temp_buffer, 4, 1, VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+    )
+    .await?;
+
+    // Wait for end of calibration: the status word at 0x0000 leaves 0xFF
+    // when the firmware is done. Up to 400 x 50 ms = 20 s.
+    let mut outcome: Result<(), FirmwareError> = Ok(());
+    let mut timeout = 0u16;
+    loop {
+        bus.read(addr, 0x0000, &mut stdev.temp_buffer[..4])
+            .await
+            .map_err(Error::Bus)?;
+        if stdev.temp_buffer[0] != VL53L8CX_STATUS_ERROR {
+            // Coverglass too good for Xtalk calibration
+            if stdev.temp_buffer[2] >= 0x7F && (stdev.temp_buffer[3] & 0x80) != 0 {
+                stdev.xtalk_data[..XTALK_BUFFER_SIZE].copy_from_slice(&DEFAULT_XTALK);
+                outcome = Err(FirmwareError::XtalkFailed);
+            }
+            break;
+        } else if timeout >= 400 {
+            outcome = Err(FirmwareError::Timeout);
+            break;
+        } else {
+            timeout += 1;
+            delay.delay_ms(50).await;
+        }
+    }
+
+    // Save Xtalk data into the Xtalk buffer (the C does this unconditionally,
+    // overwriting the default shape it just loaded on failure).
+    fetch_xtalk_data(
+        bus, addr, delay, &mut stdev.temp_buffer, &mut stdev.xtalk_data,
+    )
+    .await?;
+
+    // Reset default buffer
+    send_default_configuration(bus, addr, delay, stdev, info).await?;
+
+    // Reset initial configuration (resolution; this re-sends `xtalk_data`).
+    // The caller restores the remaining settings.
+    set_resolution(bus, addr, delay, stdev, resolution).await?;
+
+    outcome.map_err(Error::Firmware)
+}
+
 /// Set I2C address.
 pub async fn set_i2c_address<BUS: VlBusAsync>(
     bus: &mut BUS,
@@ -1348,6 +1725,58 @@ mod tests {
         f[read_size - 4] = streamcount;
         swap_buffer(&mut f, read_size); // post-swap layout -> on-wire order
         f
+    }
+
+    /// Bus that fails the test on any traffic.
+    #[cfg(feature = "xtalk")]
+    struct PanicBus;
+    #[cfg(feature = "xtalk")]
+    impl VlBusAsync for PanicBus {
+        type Error = Infallible;
+        async fn write(&mut self, _: SevenBitAddress, reg: u16, _: &[u8]) -> Result<(), Self::Error> {
+            panic!("unexpected bus write to {reg:#06x}");
+        }
+        async fn read(&mut self, _: SevenBitAddress, reg: u16, _: &mut [u8]) -> Result<(), Self::Error> {
+            panic!("unexpected bus read from {reg:#06x}");
+        }
+    }
+
+    #[cfg(feature = "xtalk")]
+    struct NoDelay;
+    #[cfg(feature = "xtalk")]
+    impl DelayNs for NoDelay {
+        async fn delay_ns(&mut self, _: u32) {}
+    }
+
+    /// The ULD's argument ranges, inclusive at both ends.
+    #[cfg(feature = "xtalk")]
+    #[test]
+    fn xtalk_param_ranges_match_uld() {
+        assert!(xtalk_params_valid(1, 1, 600));
+        assert!(xtalk_params_valid(99, 16, 3000));
+        assert!(xtalk_params_valid(3, 4, 600)); // ST's recommended setup
+        assert!(!xtalk_params_valid(0, 4, 600));
+        assert!(!xtalk_params_valid(100, 4, 600));
+        assert!(!xtalk_params_valid(5, 0, 600));
+        assert!(!xtalk_params_valid(5, 17, 600));
+        assert!(!xtalk_params_valid(5, 4, 599));
+        assert!(!xtalk_params_valid(5, 4, 3001));
+    }
+
+    /// Invalid arguments are rejected before any bus traffic.
+    #[cfg(feature = "xtalk")]
+    #[test]
+    fn calibrate_xtalk_rejects_bad_params_without_touching_the_bus() {
+        for (r, n, d) in [(0u8, 4u8, 600u16), (100, 4, 600), (5, 0, 600), (5, 17, 600), (5, 4, 599), (5, 4, 3001)] {
+            let mut stdev = State::new();
+            let result = block_on(calibrate_xtalk(
+                &mut PanicBus, 0x29, &mut NoDelay, &mut stdev, Variant::L8.info(), r, n, d,
+            ));
+            assert!(
+                matches!(result, Err(Error::Firmware(FirmwareError::InvalidParam))),
+                "({r}, {n}, {d}) -> {result:?}"
+            );
+        }
     }
 
     /// Regression: the trailing footer word must not be parsed as a block. Its

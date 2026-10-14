@@ -440,4 +440,72 @@ mod tests {
         sensor.get_caldata_xtalk(&mut buffer).await.unwrap();
         defmt::assert!(buffer == saved, "xtalk caldata round-trip mismatch");
     }
+
+    /// Crosstalk calibration against whatever is in front of the sensor (no
+    /// calibration target on the bench): the command sequence must complete
+    /// and leave the sensor usable, with its configuration restored. The
+    /// firmware may accept the scene or report `XtalkFailed` ("coverglass too
+    /// good"); both are fine here. Variant-agnostic.
+    #[cfg(feature = "xtalk")]
+    #[test]
+    #[timeout(60)]
+    async fn test_calibrate_xtalk_leaves_sensor_usable(mut sensor: Sensor) {
+        use vl53_8x8::{Error, FirmwareError};
+        sensor.init().await.unwrap();
+        sensor.set_resolution(Resolution::Res4x4).await.unwrap();
+        sensor.set_ranging_frequency_hz(5).await.unwrap();
+
+        match sensor.calibrate_xtalk(5, 4, 600).await {
+            Ok(()) => defmt::info!("xtalk calibration accepted the scene"),
+            Err(Error::Firmware(FirmwareError::XtalkFailed)) => {
+                defmt::info!("xtalk calibration: XtalkFailed (expected without a target)")
+            }
+            Err(e) => {
+                defmt::error!("calibrate_xtalk: {}", defmt::Debug2Format(&e));
+                panic!("calibrate_xtalk failed");
+            }
+        }
+
+        // Configuration restored.
+        assert_eq!(sensor.get_resolution().await.unwrap(), Resolution::Res4x4);
+        defmt::assert_eq!(sensor.get_ranging_frequency_hz().await.unwrap(), 5);
+
+        // Calibration data readable.
+        let mut buffer = [0u8; vl53_8x8::XTALK_BUFFER_SIZE];
+        sensor.get_caldata_xtalk(&mut buffer).await.unwrap();
+        defmt::assert!(buffer.iter().any(|&b| b != 0), "xtalk caldata buffer is all zeros");
+
+        // A ranging round-trip still works.
+        sensor.start_ranging().await.unwrap();
+        sensor.poll_data_ready().await.unwrap();
+        let data = sensor.get_ranging_data().await.unwrap();
+        for i in 0..16 {
+            let d = data.distance_mm[i * NB_TARGET_PER_ZONE];
+            defmt::assert!(d < 8000, "zone {} distance {} mm implausible", i, d);
+        }
+        sensor.stop_ranging().await.unwrap();
+    }
+
+    /// Out-of-range arguments are rejected with `InvalidParam` (the host-side
+    /// unit test in `ops.rs` checks that this happens before any bus traffic).
+    #[cfg(feature = "xtalk")]
+    #[test]
+    #[timeout(15)]
+    async fn test_calibrate_xtalk_rejects_invalid_params(mut sensor: Sensor) {
+        use vl53_8x8::{Error, FirmwareError};
+        sensor.init().await.unwrap();
+        sensor.set_resolution(Resolution::Res8x8).await.unwrap();
+
+        for (r, n, d) in [(0u8, 4u8, 600u16), (100, 4, 600), (5, 0, 600), (5, 17, 600), (5, 4, 599), (5, 4, 3001)] {
+            let result = sensor.calibrate_xtalk(r, n, d).await;
+            defmt::assert!(
+                matches!(result, Err(Error::Firmware(FirmwareError::InvalidParam))),
+                "calibrate_xtalk({}, {}, {}) was not rejected",
+                r, n, d
+            );
+        }
+
+        // Nothing was disturbed.
+        assert_eq!(sensor.get_resolution().await.unwrap(), Resolution::Res8x8);
+    }
 }

@@ -39,6 +39,153 @@ fn get_nvm_cmd_matches_uld() {
     assert_eq!(&uld_data::GET_NVM_CMD[..], &oracle[..]);
 }
 
+// --- Xtalk plugin command tables ---------------------------------------------------
+//
+// `VL53L8CX_CALIBRATE_XTALK` and `VL53L8CX_GET_XTALK_CMD` are `static const`
+// arrays defined in `vl53l8cx_plugin_xtalk.h` (internal linkage, blocklisted in
+// the sys crate's bindgen), so unlike the `vl53l8cx_buffers.h` tables there is
+// no C symbol to link against. These tests re-parse the header text instead
+// (`include_str!` of the file the sys crate compiles), with a deliberately
+// separate, minimal parser from the Python generator's. The one macro inside
+// the table, `VL53L8CX_FW_NBTAR_XTALK`, is resolved through bindgen, which does
+// emit it as a plain integer.
+
+mod xtalk_plugin {
+    use crate::consts;
+    use crate::sensor::L5_CALIBRATE_XTALK_PATCH;
+    use crate::uld_data;
+    use std::vec::Vec;
+    use vl53l5cx_uld_sys as l5;
+    use vl53l8cx_uld_sys as sys;
+
+    const L8_HEADER: &str =
+        include_str!("../../vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/inc/vl53l8cx_plugin_xtalk.h");
+    const L5_HEADER: &str =
+        include_str!("../../vl53l5cx-uld-sys/src/VL53L5CX_ULD_API/inc/vl53l5cx_plugin_xtalk.h");
+
+    /// Parse `... NAME[] = { ... };` out of a C header. Integer tokens are
+    /// decimal or `0x` hex with an optional `u`/`U` suffix; the token `macro`
+    /// is replaced by `macro_value` and its indices are returned alongside.
+    fn parse_c_byte_array(header: &str, name: &str, macro_name: &str, macro_value: u8) -> (Vec<u8>, Vec<usize>) {
+        let decl = header.find(&std::format!("{name}[]")).unwrap_or_else(|| panic!("{name} not found"));
+        let open = decl + header[decl..].find('{').expect("no '{'") + 1;
+        let close = open + header[open..].find('}').expect("no '}'");
+        let body = &header[open..close];
+        assert!(!body.contains("/*") && !body.contains("//"), "{name}: comments inside the array");
+        let mut bytes = Vec::new();
+        let mut macros = Vec::new();
+        for tok in body.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+            let v = if tok == macro_name {
+                macros.push(bytes.len());
+                macro_value
+            } else {
+                let t = tok.trim_end_matches(['u', 'U']);
+                match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+                    Some(hex) => u8::from_str_radix(hex, 16),
+                    None => t.parse(),
+                }
+                .unwrap_or_else(|_| panic!("{name}: bad token {tok:?}"))
+            };
+            bytes.push(v);
+        }
+        (bytes, macros)
+    }
+
+    /// Value of `#define NAME ((uint16_t)0x1234U)` style macros, which bindgen skips.
+    fn header_define(header: &str, name: &str) -> u32 {
+        let line = header
+            .lines()
+            .find(|l| l.trim_start().starts_with("#define") && l.split_whitespace().nth(1) == Some(name))
+            .unwrap_or_else(|| panic!("#define {name} not found"));
+        let hex_start = line.find("0x").unwrap_or_else(|| panic!("{name}: no hex literal"));
+        let hex: std::string::String = line[hex_start + 2..]
+            .chars()
+            .take_while(|c| c.is_ascii_hexdigit())
+            .collect();
+        u32::from_str_radix(&hex, 16).unwrap()
+    }
+
+    fn l8_calibrate_table() -> (Vec<u8>, Vec<usize>) {
+        parse_c_byte_array(
+            L8_HEADER,
+            "VL53L8CX_CALIBRATE_XTALK",
+            "VL53L8CX_FW_NBTAR_XTALK",
+            sys::VL53L8CX_FW_NBTAR_XTALK as u8,
+        )
+    }
+
+    fn l5_calibrate_table() -> (Vec<u8>, Vec<usize>) {
+        parse_c_byte_array(
+            L5_HEADER,
+            "VL53L5CX_CALIBRATE_XTALK",
+            "VL53L5CX_FW_NBTAR_XTALK",
+            l5::VL53L5CX_FW_NBTAR_XTALK as u8,
+        )
+    }
+
+    /// The generated table is ST's `VL53L8CX_CALIBRATE_XTALK`, with the
+    /// target-count macro resolved to the single-target value at the index
+    /// the generator recorded.
+    #[test]
+    fn calibrate_xtalk_table_matches_l8_header() {
+        let (oracle, macros) = l8_calibrate_table();
+        assert_eq!(sys::VL53L8CX_FW_NBTAR_XTALK, 2, "oracle built for one target per zone");
+        assert_eq!(uld_data::CALIBRATE_XTALK.len(), oracle.len());
+        assert!(uld_data::CALIBRATE_XTALK[..] == oracle[..], "CALIBRATE_XTALK differs from the header");
+        assert_eq!(macros, [uld_data::FW_NBTAR_XTALK_INDEX]);
+        assert_eq!(uld_data::CALIBRATE_XTALK[uld_data::FW_NBTAR_XTALK_INDEX], 2);
+        // The sanity check the parser gives for free: the table is a sequence
+        // of DCI blocks and ends with the ULD's standard footer.
+        assert_eq!(&oracle[oracle.len() - 8..], &[0x00, 0x00, 0x00, 0x0F, 0x00, 0x01, 0x03, 0xD4]);
+    }
+
+    /// `L5_CALIBRATE_XTALK_PATCH` is exactly the L5/L8 difference, reproduces
+    /// ST's `VL53L5CX_CALIBRATE_XTALK` byte for byte, and leaves the
+    /// target-count byte (same index in both headers) alone.
+    #[test]
+    fn l5_calibrate_xtalk_patch_is_exactly_the_l5_l8_difference() {
+        let (l8, l8_macros) = l8_calibrate_table();
+        let (l5_oracle, l5_macros) = l5_calibrate_table();
+        assert_eq!(l5::VL53L5CX_FW_NBTAR_XTALK, 2);
+        assert_eq!(l8.len(), l5_oracle.len());
+        assert_eq!(l8_macros, l5_macros, "FW_NBTAR_XTALK sits at different indices");
+
+        let diffs: Vec<usize> = (0..l8.len()).filter(|&i| l8[i] != l5_oracle[i]).collect();
+        let patched: Vec<usize> = L5_CALIBRATE_XTALK_PATCH.iter().map(|&(o, _)| o).collect();
+        assert_eq!(diffs, patched, "L5_CALIBRATE_XTALK_PATCH must cover exactly the bytes that differ");
+        assert!(!patched.contains(&uld_data::FW_NBTAR_XTALK_INDEX));
+
+        let mut cfg = uld_data::CALIBRATE_XTALK;
+        for &(o, v) in L5_CALIBRATE_XTALK_PATCH {
+            assert_ne!(cfg[o], v, "patch at {o:#06X} is a no-op");
+            cfg[o] = v;
+        }
+        assert!(cfg[..] == l5_oracle[..], "patched L5 calibrate-xtalk table differs from ST's");
+    }
+
+    /// The readback command hand-transcribed in `vl53-8x8-types` matches both
+    /// headers (it is shared between the parts).
+    #[cfg(feature = "xtalk")]
+    #[test]
+    fn get_xtalk_cmd_matches_both_headers() {
+        let (l8, m8) = parse_c_byte_array(L8_HEADER, "VL53L8CX_GET_XTALK_CMD", "", 0);
+        let (l5, m5) = parse_c_byte_array(L5_HEADER, "VL53L5CX_GET_XTALK_CMD", "", 0);
+        assert!(m8.is_empty() && m5.is_empty());
+        assert_eq!(&vl53_8x8_types::VL53L8CX_GET_XTALK_CMD[..], &l8[..]);
+        assert_eq!(&l8[..], &l5[..], "GET_XTALK_CMD differs between L5 and L8");
+    }
+
+    /// The plugin's DCI indices are the same on both parts, so one port can
+    /// address `VL53L8CX_DCI_CAL_CFG` / `VL53L8CX_DCI_XTALK_CFG` for either.
+    #[test]
+    fn xtalk_dci_indices_shared_between_variants() {
+        assert_eq!(header_define(L8_HEADER, "VL53L8CX_DCI_CAL_CFG"), consts::VL53L8CX_DCI_CAL_CFG as u32);
+        assert_eq!(header_define(L8_HEADER, "VL53L8CX_DCI_XTALK_CFG"), consts::VL53L8CX_DCI_XTALK_CFG as u32);
+        assert_eq!(header_define(L5_HEADER, "VL53L5CX_DCI_CAL_CFG"), consts::VL53L8CX_DCI_CAL_CFG as u32);
+        assert_eq!(header_define(L5_HEADER, "VL53L5CX_DCI_XTALK_CFG"), consts::VL53L8CX_DCI_XTALK_CFG as u32);
+    }
+}
+
 // --- Constants -----------------------------------------------------------------
 
 macro_rules! assert_consts_match {

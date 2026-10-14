@@ -25,11 +25,13 @@ What comes from where:
 - Protocol constants are transcribed from the ULD headers in a private
   `consts` module.
 - ST's data tables (default configuration, default crosstalk shape, NVM-read
-  command) are the generated `uld_data` module; the 86 KB firmware image is
+  command, and the xtalk plugin's calibration command with its two-byte L5
+  overlay) are the generated `uld_data` module; the 86 KB firmware image is
   `vl53l8cx_fw_base.bin`. Both are produced from the ULD's
-  `vl53l8cx_buffers.h` by `tools/extract_uld_blobs.py`. To take a new ULD
-  release: replace the C tree under `vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`,
-  run `python3 tools/extract_uld_blobs.py`, run `cargo test -p vl53-8x8`
+  `vl53l8cx_buffers.h` and the `vl53l{5,8}cx_plugin_xtalk.h` headers by
+  `tools/extract_uld_blobs.py`. To take a new ULD release: replace the C
+  tree under `vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`, run
+  `python3 tools/extract_uld_blobs.py`, run `cargo test -p vl53-8x8`
   and review the diff.
 - [`ResultsData`] is a `#[repr(C)]` rendering of the ULD's result struct
   with the same feature gating.
@@ -406,95 +408,18 @@ where
 
     // --- Configuration methods ---
 
+    /// Set the zone grid. Also re-sends the offset and crosstalk calibration
+    /// data, which are resolution dependent (see [`ops::set_resolution`]).
     pub async fn set_resolution(&mut self, resolution: Resolution) -> Result<(), Error<BUS::Error>> {
-        let res = resolution as u8;
-        // Use local buffers for DCI operations — NOT stdev.offset_data,
-        // which holds calibration data needed by send_offset_data later.
-        let mut dss_buf = [0u8; 16];
-        let mut zone_buf = [0u8; 8];
-        match resolution {
-            Resolution::Res4x4 => {
-                ops::dci_read(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut dss_buf,
-                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
-                ).await?;
-                dss_buf[0x04] = 64;
-                dss_buf[0x06] = 64;
-                dss_buf[0x09] = 4;
-                ops::dci_write(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut dss_buf,
-                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
-                ).await?;
-
-                ops::dci_read(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut zone_buf,
-                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
-                ).await?;
-                zone_buf[0x00] = 4;
-                zone_buf[0x01] = 4;
-                zone_buf[0x04] = 8;
-                zone_buf[0x05] = 8;
-                ops::dci_write(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut zone_buf,
-                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
-                ).await?;
-            }
-            Resolution::Res8x8 => {
-                ops::dci_read(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut dss_buf,
-                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
-                ).await?;
-                dss_buf[0x04] = 16;
-                dss_buf[0x06] = 16;
-                dss_buf[0x09] = 1;
-                ops::dci_write(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut dss_buf,
-                    consts::VL53L8CX_DCI_DSS_CONFIG as u32, 16,
-                ).await?;
-
-                ops::dci_read(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut zone_buf,
-                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
-                ).await?;
-                zone_buf[0x00] = 8;
-                zone_buf[0x01] = 8;
-                zone_buf[0x04] = 4;
-                zone_buf[0x05] = 4;
-                ops::dci_write(
-                    &mut self.bus, self.address, &mut self.delay,
-                    &mut self.stdev.temp_buffer, &mut zone_buf,
-                    consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
-                ).await?;
-            }
-        }
-
-        ops::send_offset_data(
-            &mut self.bus, self.address, &mut self.delay,
-            &mut self.stdev.temp_buffer, &self.stdev.offset_data, res,
-        ).await?;
-        ops::send_xtalk_data(
-            &mut self.bus, self.address, &mut self.delay,
-            &mut self.stdev.temp_buffer, &self.stdev.xtalk_data, res,
-        ).await?;
-
-        Ok(())
+        ops::set_resolution(
+            &mut self.bus, self.address, &mut self.delay, &mut self.stdev, resolution as u8,
+        ).await
     }
 
     pub async fn get_resolution(&mut self) -> Result<Resolution, Error<BUS::Error>> {
-        let mut buf = [0u8; 8];
-        ops::dci_read(
-            &mut self.bus, self.address, &mut self.delay,
-            &mut self.stdev.temp_buffer, &mut buf,
-            consts::VL53L8CX_DCI_ZONE_CONFIG as u32, 8,
+        let res = ops::get_resolution(
+            &mut self.bus, self.address, &mut self.delay, &mut self.stdev.temp_buffer,
         ).await?;
-        let res = buf[0] * buf[1];
         if res == types::VL53L8CX_RESOLUTION_8X8 {
             Ok(Resolution::Res8x8)
         } else {
@@ -1111,6 +1036,11 @@ where
         ).await
     }
 
+    /// Read the crosstalk shape the sensor is currently using into `buffer`
+    /// (at least [`XTALK_BUFFER_SIZE`] bytes): the ULD default, the shape
+    /// produced by [`Sensor::calibrate_xtalk`], or whatever
+    /// [`Sensor::set_caldata_xtalk`] loaded. Store it to replay with
+    /// `set_caldata_xtalk` after the next power-up.
     pub async fn get_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<BUS::Error>> {
         if buffer.len() < XTALK_BUFFER_SIZE {
             return Err(Error::Firmware(FirmwareError::InvalidParam));
@@ -1120,31 +1050,99 @@ where
         let resolution = self.get_resolution().await?;
         self.set_resolution(Resolution::Res8x8).await?;
 
-        // Send GET_XTALK_CMD to 0x2fb8
-        self.bus.write(self.address, 0x2fb8, &types::VL53L8CX_GET_XTALK_CMD)
-            .await.map_err(Error::Bus)?;
-        ops::poll_for_answer(
+        ops::fetch_xtalk_data(
             &mut self.bus, self.address, &mut self.delay,
-            &mut self.stdev.temp_buffer, 4, 1,
-            consts::VL53L8CX_UI_CMD_STATUS, 0xFF, 0x03,
+            &mut self.stdev.temp_buffer, buffer,
         ).await?;
-
-        // Read xtalk data (XTALK_BUFFER_SIZE + 4 bytes)
-        let read_size = XTALK_BUFFER_SIZE + 4;
-        self.bus.read(
-            self.address, consts::VL53L8CX_UI_CMD_START,
-            &mut self.stdev.temp_buffer[..read_size],
-        ).await.map_err(Error::Bus)?;
-
-        // Copy data: skip first 8 bytes of response, take XTALK_BUFFER_SIZE - 8 bytes
-        buffer[..XTALK_BUFFER_SIZE - 8]
-            .copy_from_slice(&self.stdev.temp_buffer[8..XTALK_BUFFER_SIZE]);
-        // Append footer
-        let footer: [u8; 8] = [0x00, 0x00, 0x00, 0x0F, 0x00, 0x01, 0x03, 0x04];
-        buffer[XTALK_BUFFER_SIZE - 8..XTALK_BUFFER_SIZE].copy_from_slice(&footer);
 
         // Restore resolution
         self.set_resolution(resolution).await
+    }
+
+    /// Run the firmware's crosstalk calibration against a flat, uniform
+    /// target and keep the resulting shape (port of `vl53l8cx_calibrate_xtalk`;
+    /// one code path for both parts, see [`sensor::L5_CALIBRATE_XTALK_PATCH`]).
+    ///
+    /// Crosstalk is the light reflected back into the receiver by a coverglass
+    /// in front of the sensor. ST recommends running this calibration once per
+    /// device whenever a coverglass is fitted; without one the default shape
+    /// is adequate and the firmware will usually refuse to calibrate.
+    ///
+    /// # Setup
+    ///
+    /// Place a flat target of known, low reflectance so that it fills the full
+    /// field of view, in a dark environment, and pass:
+    ///
+    /// - `reflectance_percent`: the target's reflectance, 1..=99 %. ST
+    ///   recommends a 3 % target (a matte dark grey card); 5 % is common.
+    /// - `nb_samples`: frames averaged, 1..=16. More samples give a more
+    ///   accurate shape but take longer; 4 is a good compromise.
+    /// - `distance_mm`: target distance, 600..=3000 mm. The target must stay
+    ///   inside the full FoV, so short distances (600 mm) are easiest.
+    ///
+    /// Arguments outside those ranges return [`FirmwareError::InvalidParam`]
+    /// before anything is sent to the sensor.
+    ///
+    /// # Behaviour
+    ///
+    /// The calibration takes a few seconds (the driver waits up to 20 s). On
+    /// return the sensor is back in the configuration it had on entry
+    /// (resolution, ranging frequency, integration time, sharpener, target
+    /// order, crosstalk margin and ranging mode are saved and restored, as the
+    /// ULD does), with the new crosstalk shape applied. It is kept in the
+    /// driver state and re-sent on every [`Sensor::set_resolution`]; retrieve
+    /// it with [`Sensor::get_caldata_xtalk`] to persist it, and replay it with
+    /// [`Sensor::set_caldata_xtalk`] after each [`Sensor::init`]. The margin
+    /// ([`Sensor::set_xtalk_margin`]) can then be used to trade false
+    /// positives for sensitivity.
+    ///
+    /// # Errors
+    ///
+    /// - [`FirmwareError::XtalkFailed`]: the firmware found the coverglass
+    ///   too good (too little crosstalk) to calibrate, or there was no
+    ///   suitable target; the default shape is restored. Expected when no
+    ///   coverglass is fitted.
+    /// - [`FirmwareError::Timeout`]: the calibration did not finish within
+    ///   20 s.
+    ///
+    /// In both cases the previous configuration has still been restored and
+    /// the sensor is usable.
+    pub async fn calibrate_xtalk(
+        &mut self,
+        reflectance_percent: u8,
+        nb_samples: u8,
+        distance_mm: u16,
+    ) -> Result<(), Error<BUS::Error>> {
+        // Validate before the configuration reads below touch the bus (the
+        // ULD reads first, then checks; see `ops::calibrate_xtalk`).
+        if !ops::xtalk_params_valid(reflectance_percent, nb_samples, distance_mm) {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+
+        // Get initial configuration (resolution is handled inside the op).
+        let frequency = self.get_ranging_frequency_hz().await?;
+        let integration_time_ms = self.get_integration_time_ms().await?;
+        let sharpener = self.get_sharpener_percent().await?;
+        let target_order = self.get_target_order().await?;
+        let xtalk_margin = self.get_xtalk_margin().await?;
+        let ranging_mode = self.get_ranging_mode().await?;
+
+        let outcome = ops::calibrate_xtalk(
+            &mut self.bus, self.address, &mut self.delay, &mut self.stdev,
+            self.variant.info(), reflectance_percent, nb_samples, distance_mm,
+        ).await;
+
+        // Reset initial configuration, in the ULD's order and whatever the
+        // calibration outcome, so the sensor is left as it was found. The op
+        // has already reset the default configuration and the resolution.
+        self.set_ranging_frequency_hz(frequency).await?;
+        self.set_integration_time_ms(integration_time_ms).await?;
+        self.set_sharpener_percent(sharpener).await?;
+        self.set_target_order(target_order).await?;
+        self.set_xtalk_margin(xtalk_margin).await?;
+        self.set_ranging_mode(ranging_mode).await?;
+
+        outcome
     }
 
     pub async fn set_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<BUS::Error>> {

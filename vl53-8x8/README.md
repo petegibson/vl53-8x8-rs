@@ -67,7 +67,7 @@ loop {
 
 | Feature                              | Effect                                                            |
 | ------------------------------------ | ----------------------------------------------------------------- |
-| `xtalk`                              | Crosstalk margin and calibration data (`get/set_xtalk_margin`, `get/set_caldata_xtalk`) |
+| `xtalk`                              | Crosstalk calibration for coverglass use (`calibrate_xtalk`, `get/set_caldata_xtalk`, `get/set_xtalk_margin`) |
 | `motion`                             | Motion indicator plugin and the `motion_indicator` result field   |
 | `thresholds`                         | Per-zone detection thresholds, incl. auto-stop (VL53L8CX only)    |
 | `raw-format`                         | Return the sensor's fixed-point units instead of mm / kcps / %    |

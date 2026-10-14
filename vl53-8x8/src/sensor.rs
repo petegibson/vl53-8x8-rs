@@ -15,6 +15,7 @@ use crate::bus::VlBusAsync;
 use crate::firmware::{PatchedFirmware, BASE_FIRMWARE};
 use embedded_hal::i2c::SevenBitAddress;
 use crate::consts::{NB_TARGET_PER_ZONE, VL53L8CX_FW_CHECKSUM};
+use crate::uld_data;
 use vl53_8x8_types::Error;
 
 /// Device id register (reg 0) value common to both supported parts.
@@ -53,6 +54,24 @@ pub const L5_CONFIG_PATCH: &[(usize, u8)] = &[
 
 /// Empty overlay: the shared default configuration is already the L8 one.
 pub const L8_CONFIG_PATCH: &[(usize, u8)] = &[];
+
+/// Patch overlaying the shared (L8) xtalk-calibration command table
+/// (`uld_data::CALIBRATE_XTALK`, ST's `VL53L8CX_CALIBRATE_XTALK`) to produce
+/// the VL53L5CX `VL53L5CX_CALIBRATE_XTALK` table. Generated and verified
+/// byte-exact against ST ULD 2.0.1 `vl53l5cx_plugin_xtalk.h` by
+/// `tools/extract_uld_blobs.py`.
+///
+/// This is the *only* L5/L8 difference in the xtalk plugin: the two
+/// `calibrate_xtalk` C functions are identical apart from whitespace, and the
+/// `GET_XTALK_CMD` tables match. The two bytes sit in the 0xB39C
+/// (`VL53L8CX_DCI_INTERNAL_CP`) block of the command table, at the same
+/// offsets and with the same values as the last two entries of
+/// [`L5_CONFIG_PATCH`]: the VL53L5CX enables its internal charge pump there,
+/// the VL53L8CX leaves it off (cf. [`SensorInfo::has_internal_cp`]).
+pub const L5_CALIBRATE_XTALK_PATCH: &[(usize, u8)] = uld_data::L5_CALIBRATE_XTALK_PATCH;
+
+/// Empty overlay: the shared xtalk-calibration command table is already the L8 one.
+pub const L8_CALIBRATE_XTALK_PATCH: &[(usize, u8)] = &[];
 
 /// Patch applied to the default configuration, after the variant patch, when
 /// the crate is built for more than one target per zone (`targets-2/3/4`).
@@ -102,6 +121,9 @@ pub struct SensorInfo {
     pub fw_patch: &'static [(usize, u8)],
     /// Overlay applied to the shared default configuration for this variant.
     pub config_patch: &'static [(usize, u8)],
+    /// Overlay applied to the shared xtalk-calibration command table
+    /// (`VL53L8CX_CALIBRATE_XTALK`) by `calibrate_xtalk` (`xtalk` feature).
+    pub calibrate_xtalk_patch: &'static [(usize, u8)],
     /// Whether init programs the glare filter (L5 only).
     pub has_glare_filter: bool,
     /// Whether `get_ranging_data` clamps negative distances to 0 (L5 only).
@@ -126,6 +148,7 @@ const L5_INFO: SensorInfo = SensorInfo {
     fw_checksum: None,
     fw_patch: L5_FW_PATCH,
     config_patch: L5_CONFIG_PATCH,
+    calibrate_xtalk_patch: L5_CALIBRATE_XTALK_PATCH,
     has_glare_filter: true,
     clamp_negative_distance: true,
     has_laser_safety_check: false,
@@ -141,6 +164,7 @@ const L8_INFO: SensorInfo = SensorInfo {
     fw_checksum: Some(VL53L8CX_FW_CHECKSUM),
     fw_patch: L8_FW_PATCH,
     config_patch: L8_CONFIG_PATCH,
+    calibrate_xtalk_patch: L8_CALIBRATE_XTALK_PATCH,
     has_glare_filter: false,
     clamp_negative_distance: false,
     has_laser_safety_check: true,
@@ -303,6 +327,21 @@ mod tests {
         // The L5 patch never touches the target-count byte, so the two
         // overlays commute and `NB_TARGET_CONFIG_PATCH` can be applied last.
         assert!(p.iter().all(|&(o, _)| o != FW_NBTAR_RANGING_INDEX));
+    }
+
+    #[test]
+    fn calibrate_xtalk_patch_is_l5_only_and_in_bounds() {
+        assert!(Variant::L8.info().calibrate_xtalk_patch.is_empty());
+        let p = Variant::L5.info().calibrate_xtalk_patch;
+        assert_eq!(p.len(), 2);
+        assert!(p.iter().all(|&(o, _)| o < uld_data::CALIBRATE_XTALK.len()));
+        assert!(p.windows(2).all(|w| w[0].0 < w[1].0), "sorted ascending");
+        // Never overlaps the target-count byte, so the two overlays commute.
+        assert!(p.iter().all(|&(o, _)| o != uld_data::FW_NBTAR_XTALK_INDEX));
+        // Same two bytes the L5 flips in the default configuration (0xB39C block).
+        for entry in p {
+            assert!(L5_CONFIG_PATCH.contains(entry), "{entry:?} not in L5_CONFIG_PATCH");
+        }
     }
 
     #[test]
