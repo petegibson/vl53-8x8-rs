@@ -522,6 +522,11 @@ mod tests {
         use vl53_8x8::{Error, FirmwareError};
         const REFLECTANCE_PERCENT: u8 = 50;
         const NB_SAMPLES: u8 = 8;
+        /// Known distance to the calibration surface, if the uncalibrated
+        /// sensor cannot measure it (heavy crosstalk reports ~0 mm). `None`
+        /// uses the mean valid distance of the "before" frame, falling back
+        /// to the ULD minimum of 600 mm when no zone is valid.
+        const KNOWN_DISTANCE_MM: Option<u16> = None;
 
         async fn frame(sensor: &mut SensorRef, label: &str) -> i32 {
             sensor.start_ranging().await.unwrap();
@@ -550,7 +555,14 @@ mod tests {
         sensor.set_ranging_frequency_hz(5).await.unwrap();
 
         let mean = frame(&mut sensor, "before").await;
-        let distance_mm = mean.clamp(600, 3000) as u16;
+        let distance_mm = match KNOWN_DISTANCE_MM {
+            Some(d) => d,
+            None if mean == 0 => {
+                defmt::warn!("no valid zone before calibration; falling back to 600 mm");
+                600
+            }
+            None => mean.clamp(600, 3000) as u16,
+        };
         defmt::info!(
             "calibrate_xtalk(reflectance {}%, {} samples, {} mm) ...",
             REFLECTANCE_PERCENT, NB_SAMPLES, distance_mm
