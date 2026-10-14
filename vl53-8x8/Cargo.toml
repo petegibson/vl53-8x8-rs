@@ -24,6 +24,10 @@ defmt = { version = "1", optional = true }
 # into the driver, so downstream builds need no libclang. Built with its default
 # features; layout tests therefore run only under this crate's default features.
 vl53l8cx-uld-sys = { path = "../vl53l8cx-uld-sys", version = "0.1.0" }
+# VL53L5CX oracle: ST's L5 ULD, compiled the same way. Unpublished and path-only
+# (Cargo strips path-only dev-dependencies from the published manifest). Lets
+# the tests check the L5 firmware/config patches against ST's real L5 arrays.
+vl53l5cx-uld-sys = { path = "../vl53l5cx-uld-sys" }
 
 [features]
 default = []

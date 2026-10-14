@@ -1,0 +1,33 @@
+# vl53l5cx-uld-sys
+
+Raw FFI bindings to STMicroelectronics' **VL53L5CX Ultra Lite Driver** (ULD
+2.0.x, package STSW-IMG023), compiled with `cc` and bound with `bindgen` at
+build time.
+
+**This crate is not published and is not a user-facing driver.** The
+pure-Rust [`vl53-8x8`](../vl53-8x8) crate drives the VL53L5CX (and VL53L8CX)
+natively. `vl53l5cx-uld-sys` exists only as a *test oracle*: `vl53-8x8`
+builds the VL53L8CX firmware image and default configuration into the
+VL53L5CX ones by applying small byte patches, and this crate lets its unit
+tests compare the patched results against ST's actual VL53L5CX arrays
+(`VL53L5CX_FIRMWARE`, `VL53L5CX_DEFAULT_CONFIGURATION`, ...) byte for byte,
+and check that the register map really is shared between the two parts.
+
+It is a path-only dev-dependency of `vl53-8x8`, which Cargo strips from the
+published manifest, so downstream users of `vl53-8x8` never build it and
+never need libclang.
+
+For the VL53L8CX the equivalent crate, [`vl53l8cx-uld-sys`](../vl53l8cx-uld-sys),
+*is* published because the blocking wrapper `vl53l8cx-uld` depends on it.
+
+## Build requirements
+
+`bindgen` needs libclang (`LIBCLANG_PATH`). The repository's `flake.nix` dev
+shell provides it.
+
+## License
+
+BSD-3-Clause. The ULD C sources under `src/VL53L5CX_ULD_API/` are
+copyright STMicroelectronics, BSD-3-Clause (see `LICENSE-ST`). The Rust
+build glue originates from Scott Wakefield's `vl53l5cx-sys` crate,
+relicensed under BSD-3-Clause with the author's permission.

@@ -1,0 +1,41 @@
+[package]
+name = "vl53l5cx-uld-sys"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+license = "BSD-3-Clause"
+description = "Raw FFI bindings (bindgen + cc) to the STMicroelectronics VL53L5CX Ultra Lite Driver (ULD) C sources. Unpublished; used only as a test oracle for the pure-Rust vl53-8x8 driver."
+readme = "README.md"
+links = "vl53l5cx_uld"
+# Test oracle only. The pure-Rust `vl53-8x8` driver covers the VL53L5CX for
+# users; this crate exists so its L5 firmware/config patches can be checked
+# byte-for-byte against ST's own L5 arrays. Path-only dev-dependencies are
+# stripped from published manifests, so it never needs to be on crates.io.
+publish = false
+
+[dependencies]
+cty = "0.2"
+
+[build-dependencies]
+bindgen = "0.69"
+cc = "1.2"
+
+[features]
+# Standard Plugin Features (Opt-in to include)
+xtalk = []
+motion = []
+thresholds = []
+
+# --- Raw Firmware Format ---
+raw-format = []
+
+# --- Output Disablement Features for Size Optimization (Opt-in to DISABLE/remove) ---
+disable-ambient = []
+disable-spads = []
+disable-nb-targets = []
+disable-signal = []
+disable-range-sigma = []
+disable-distance = []
+disable-target-status = []
+disable-reflectance = []
+disable-motion-indicator-output = []

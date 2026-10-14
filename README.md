@@ -23,6 +23,7 @@ Two drivers share one set of types:
 | [`vl53-8x8`](./vl53-8x8)             | Pure-Rust async driver for VL53L5CX + VL53L8CX (`embedded-hal-async`).  |
 | [`vl53l8cx-uld-sys`](./vl53l8cx-uld-sys) | bindgen + `cc` over ST's VL53L8CX ULD C sources and firmware.          |
 | [`vl53l8cx-uld`](./vl53l8cx-uld)     | Safe blocking `embedded-hal` wrapper over `vl53l8cx-uld-sys`.           |
+| [`vl53l5cx-uld-sys`](./vl53l5cx-uld-sys) | ST's VL53L5CX ULD, compiled the same way. **Unpublished** test oracle: lets `vl53-8x8` check its L5 firmware/config patches against ST's L5 arrays byte for byte. |
 | [`nucleo-f401re/`](./nucleo-f401re)  | Demo: blocking (`vl53l8cx-uld`) on STM32F401RE Nucleo + X-NUCLEO-53L8A1, I²C or SPI (`spi-bus`). |
 | [`nucleo-f401re-async/`](./nucleo-f401re-async) | Demo: async (`vl53-8x8`, Embassy) on the same board.           |
 | [`evo-f412re-async/`](./evo-f412re-async) | Demo: async (`vl53-8x8`) on a custom STM32F412RE board, DMA I²C, L5 or L8, two sensors on one bus. |

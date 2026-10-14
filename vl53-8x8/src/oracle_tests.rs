@@ -172,3 +172,136 @@ mod layout {
         assert_eq!(size_of_val(&s.xtalk_data), size_of_val(&c.xtalk_data));
     }
 }
+
+// --- VL53L5CX oracle --------------------------------------------------------------
+//
+// `vl53-8x8` derives the VL53L5CX firmware image and default configuration from
+// the VL53L8CX ones by applying small byte patches. `vl53l5cx-uld-sys` (an
+// unpublished, path-only dev-dependency) compiles ST's actual VL53L5CX ULD, so
+// these tests pin the patches to ST's arrays byte for byte and confirm that the
+// register map and the remaining data tables really are shared between the parts.
+
+mod l5 {
+    use crate::consts;
+    use crate::firmware::{FirmwareSource, PatchedFirmware, BASE_FIRMWARE, FIRMWARE_LEN};
+    use crate::sensor::{L5_CONFIG_PATCH, L5_FW_PATCH};
+    use crate::uld_data;
+    use vl53l5cx_uld_sys as l5;
+    use vl53l8cx_uld_sys as l8;
+
+    /// Drain a firmware source the way the upload loop does.
+    fn collect(src: &mut impl FirmwareSource, max: usize) -> std::vec::Vec<u8> {
+        let mut out = std::vec::Vec::with_capacity(src.len());
+        let mut off = 0;
+        while off < src.len() {
+            let chunk = src.chunk(off, (src.len() - off).min(max));
+            assert!(!chunk.is_empty());
+            out.extend_from_slice(chunk);
+            off += chunk.len();
+        }
+        out
+    }
+
+    /// Offsets at which two equal-length byte slices differ.
+    fn diff_offsets(a: &[u8], b: &[u8]) -> std::vec::Vec<usize> {
+        assert_eq!(a.len(), b.len());
+        (0..a.len()).filter(|&i| a[i] != b[i]).collect()
+    }
+
+    #[test]
+    fn patched_firmware_matches_l5_uld() {
+        let oracle = unsafe { &l5::VL53L5CX_FIRMWARE };
+        assert_eq!(oracle.len(), FIRMWARE_LEN);
+        for max in [FIRMWARE_LEN, 0x8000, 4096, 1] {
+            let img = collect(&mut PatchedFirmware::new(BASE_FIRMWARE, L5_FW_PATCH), max);
+            assert_eq!(img.len(), oracle.len());
+            assert!(
+                img[..] == oracle[..],
+                "patched L5 firmware differs from ST's (chunk {max})"
+            );
+        }
+    }
+
+    #[test]
+    fn l5_fw_patch_is_exactly_the_l5_l8_difference() {
+        let l5fw = unsafe { &l5::VL53L5CX_FIRMWARE };
+        let l8fw = unsafe { &l8::VL53L8CX_FIRMWARE };
+        let diffs = diff_offsets(&l8fw[..], &l5fw[..]);
+        let patched: std::vec::Vec<usize> = L5_FW_PATCH.iter().map(|&(o, _)| o).collect();
+        assert_eq!(diffs, patched, "L5_FW_PATCH must cover exactly the bytes that differ");
+        for &(o, v) in L5_FW_PATCH {
+            assert_eq!(v, l5fw[o], "patch value at {o:#07X}");
+            assert_ne!(v, l8fw[o], "patch at {o:#07X} is a no-op");
+        }
+    }
+
+    #[test]
+    fn patched_configuration_matches_l5_uld() {
+        let oracle = unsafe { &l5::VL53L5CX_DEFAULT_CONFIGURATION };
+        let mut cfg = uld_data::DEFAULT_CONFIGURATION;
+        for &(o, v) in L5_CONFIG_PATCH {
+            cfg[o] = v;
+        }
+        assert_eq!(cfg.len(), oracle.len());
+        assert!(
+            cfg[..] == oracle[..],
+            "patched L5 default configuration differs from ST's"
+        );
+    }
+
+    #[test]
+    fn l5_config_patch_is_exactly_the_l5_l8_difference() {
+        let l5cfg = unsafe { &l5::VL53L5CX_DEFAULT_CONFIGURATION };
+        let diffs = diff_offsets(&uld_data::DEFAULT_CONFIGURATION[..], &l5cfg[..]);
+        let patched: std::vec::Vec<usize> = L5_CONFIG_PATCH.iter().map(|&(o, _)| o).collect();
+        assert_eq!(diffs, patched, "L5_CONFIG_PATCH must cover exactly the bytes that differ");
+    }
+
+    #[test]
+    fn xtalk_and_nvm_tables_are_shared_between_variants() {
+        let xtalk = unsafe { &l5::VL53L5CX_DEFAULT_XTALK };
+        let nvm = unsafe { &l5::VL53L5CX_GET_NVM_CMD };
+        assert!(uld_data::DEFAULT_XTALK[..] == xtalk[..], "L5 default xtalk differs");
+        assert!(uld_data::GET_NVM_CMD[..] == nvm[..], "L5 NVM command differs");
+    }
+
+    macro_rules! assert_l5_consts_match {
+        ($($l8:ident => $l5:ident),+ $(,)?) => {
+            $( assert_eq!(consts::$l8, l5::$l5, stringify!($l5)); )+
+        };
+    }
+
+    /// The driver uses one register map for both parts; confirm it against the L5 header.
+    #[test]
+    fn shared_register_map_matches_l5_header() {
+        assert_l5_consts_match!(
+            VL53L8CX_UI_CMD_STATUS => VL53L5CX_UI_CMD_STATUS,
+            VL53L8CX_UI_CMD_START => VL53L5CX_UI_CMD_START,
+            VL53L8CX_UI_CMD_END => VL53L5CX_UI_CMD_END,
+            VL53L8CX_NVM_DATA_SIZE => VL53L5CX_NVM_DATA_SIZE,
+            VL53L8CX_CONFIGURATION_SIZE => VL53L5CX_CONFIGURATION_SIZE,
+            VL53L8CX_OFFSET_BUFFER_SIZE => VL53L5CX_OFFSET_BUFFER_SIZE,
+            VL53L8CX_DCI_ZONE_CONFIG => VL53L5CX_DCI_ZONE_CONFIG,
+            VL53L8CX_DCI_FREQ_HZ => VL53L5CX_DCI_FREQ_HZ,
+            VL53L8CX_DCI_INT_TIME => VL53L5CX_DCI_INT_TIME,
+            VL53L8CX_DCI_FW_NB_TARGET => VL53L5CX_DCI_FW_NB_TARGET,
+            VL53L8CX_DCI_RANGING_MODE => VL53L5CX_DCI_RANGING_MODE,
+            VL53L8CX_DCI_DSS_CONFIG => VL53L5CX_DCI_DSS_CONFIG,
+            VL53L8CX_DCI_VHV_CONFIG => VL53L5CX_DCI_VHV_CONFIG,
+            VL53L8CX_DCI_TARGET_ORDER => VL53L5CX_DCI_TARGET_ORDER,
+            VL53L8CX_DCI_SHARPENER => VL53L5CX_DCI_SHARPENER,
+            VL53L8CX_DCI_INTERNAL_CP => VL53L5CX_DCI_INTERNAL_CP,
+            VL53L8CX_DCI_SYNC_PIN => VL53L5CX_DCI_SYNC_PIN,
+            VL53L8CX_DCI_MOTION_DETECTOR_CFG => VL53L5CX_DCI_MOTION_DETECTOR_CFG,
+            VL53L8CX_DCI_SINGLE_RANGE => VL53L5CX_DCI_SINGLE_RANGE,
+            VL53L8CX_DCI_OUTPUT_CONFIG => VL53L5CX_DCI_OUTPUT_CONFIG,
+            VL53L8CX_DCI_OUTPUT_ENABLES => VL53L5CX_DCI_OUTPUT_ENABLES,
+            VL53L8CX_DCI_OUTPUT_LIST => VL53L5CX_DCI_OUTPUT_LIST,
+            VL53L8CX_DCI_PIPE_CONTROL => VL53L5CX_DCI_PIPE_CONTROL,
+        );
+        assert_eq!(
+            vl53_8x8_types::XTALK_BUFFER_SIZE,
+            l5::VL53L5CX_XTALK_BUFFER_SIZE as usize
+        );
+    }
+}

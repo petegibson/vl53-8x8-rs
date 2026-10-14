@@ -2,6 +2,7 @@
 members = [
     "vl53-8x8-types",
     "vl53l8cx-uld-sys",
+    "vl53l5cx-uld-sys",
     "vl53l8cx-uld",
     "vl53-8x8",
 ]

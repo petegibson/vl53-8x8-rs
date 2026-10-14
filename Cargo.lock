@@ -398,12 +398,22 @@ dependencies = [
  "embedded-hal",
  "embedded-hal-async",
  "vl53-8x8-types",
+ "vl53l5cx-uld-sys",
  "vl53l8cx-uld-sys",
 ]
 
 [[package]]
 name = "vl53-8x8-types"
 version = "0.1.0"
+
+[[package]]
+name = "vl53l5cx-uld-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cty",
+]
 
 [[package]]
 name = "vl53l8cx-uld"
