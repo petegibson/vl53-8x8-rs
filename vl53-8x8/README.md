@@ -103,8 +103,9 @@ git diff vl53-8x8/src/uld_data.rs          # review the table changes
 
 Verified with this crate layout, via the demo crates' on-target test suites:
 
-* STM32F401RE Nucleo + X-NUCLEO-53L8A1 shield (VL53L8CX) over SPI
-  (`nucleo-f401re-async`).
+* STM32F401RE Nucleo + X-NUCLEO-53L8A1 shield (VL53L8CX) over SPI and over
+  I2C, both true async DMA I2C and the `BlockingI2c` adapter
+  (`nucleo-f401re-async`, embassy-stm32 0.6 / embassy-executor 0.10).
 * STM32F412RE custom board over async DMA I2C, with both a VL53L8CX and a
   VL53L5CX fitted in turn: autodetect, the patched-firmware upload path and
   the full test suite pass on each (`evo-f412re-async`).

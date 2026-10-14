@@ -17,6 +17,8 @@ mod bus_setup {
     embassy_stm32::bind_interrupts!(struct Irqs {
         I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
+        DMA1_STREAM6 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH6>;
+        DMA1_STREAM0 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH0>;
     });
 
     type I2cInst = i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>;
@@ -56,9 +58,9 @@ mod bus_setup {
             unsafe { core::ptr::read(&raw const p.I2C1) },
             unsafe { core::ptr::read(&raw const p.PB8) },
             unsafe { core::ptr::read(&raw const p.PB9) },
-            Irqs,
             unsafe { core::ptr::read(&raw const p.DMA1_CH6) },
             unsafe { core::ptr::read(&raw const p.DMA1_CH0) },
+            Irqs,
             i2c_config,
         );
 
@@ -93,6 +95,11 @@ mod bus_setup {
     use embassy_stm32::spi;
     use embedded_hal_bus::spi::ExclusiveDevice;
 
+    embassy_stm32::bind_interrupts!(struct Irqs {
+        DMA2_STREAM3 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA2_CH3>;
+        DMA2_STREAM0 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA2_CH0>;
+    });
+
     type SpiDev = ExclusiveDevice<
         spi::Spi<'static, embassy_stm32::mode::Async, embassy_stm32::spi::mode::Master>,
         Output<'static>,
@@ -126,6 +133,7 @@ mod bus_setup {
             unsafe { core::ptr::read(&raw const p.PB4) },  // MISO
             unsafe { core::ptr::read(&raw const p.DMA2_CH3) }, // TX
             unsafe { core::ptr::read(&raw const p.DMA2_CH0) }, // RX
+            Irqs,
             spi_config,
         );
 

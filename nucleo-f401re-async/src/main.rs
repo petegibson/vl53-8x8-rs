@@ -18,6 +18,15 @@ const RANGING_FREQ_HZ: u8 = 10;
 embassy_stm32::bind_interrupts!(struct Irqs {
     I2C1_EV => embassy_stm32::i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
     I2C1_ER => embassy_stm32::i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
+    DMA1_STREAM6 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH6>;
+    DMA1_STREAM0 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH0>;
+});
+
+// SPI1 DMA interrupt bindings
+#[cfg(feature = "spi-bus")]
+embassy_stm32::bind_interrupts!(struct SpiIrqs {
+    DMA2_STREAM3 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA2_CH3>;
+    DMA2_STREAM0 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA2_CH0>;
 });
 
 #[embassy_executor::main]
@@ -60,7 +69,8 @@ async fn main(_spawner: Spawner) {
     pwr_en_c.set_high();
     cortex_m::asm::delay(84_000 * 50);
 
-    // --- I2C mode with BlockingI2c wrapper (for I2C v1 issues on F401) ---
+    // --- I2C mode via the BlockingI2c adapter (optional; true async I2C works
+    //     on the F401 with embassy-stm32 >= 0.6, this is kept as a demo of the adapter) ---
     #[cfg(all(not(feature = "spi-bus"), feature = "blocking-i2c"))]
     let mut sensor = {
         let mut i2c_config = embassy_stm32::i2c::Config::default();
@@ -69,9 +79,9 @@ async fn main(_spawner: Spawner) {
             p.I2C1,
             p.PB8,
             p.PB9,
-            Irqs,
             p.DMA1_CH6,
             p.DMA1_CH0,
+            Irqs,
             i2c_config,
         );
 
@@ -88,9 +98,9 @@ async fn main(_spawner: Spawner) {
             p.I2C1,
             p.PB8,
             p.PB9,
-            Irqs,
             p.DMA1_CH6,
             p.DMA1_CH0,
+            Irqs,
             i2c_config,
         );
 
@@ -119,6 +129,7 @@ async fn main(_spawner: Spawner) {
             p.PB4,  // MISO
             p.DMA2_CH3, // TX
             p.DMA2_CH0, // RX
+            SpiIrqs,
             spi_config,
         );
 
