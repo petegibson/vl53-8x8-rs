@@ -5,7 +5,7 @@ use defmt_rtt as _;
 
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_time::Delay;
-use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder};
+use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder, NB_TARGET_PER_ZONE};
 
 // --- I2C mode (default) ---
 
@@ -253,7 +253,9 @@ mod tests {
         sensor.poll_data_ready().await.unwrap();
 
         let data = sensor.get_ranging_data().await.unwrap();
-        for (i, &d) in data.distance_mm[..16].iter().enumerate() {
+        // First (closest/strongest) target of each zone: entry zone * N.
+        for i in 0..16 {
+            let d = data.distance_mm[i * NB_TARGET_PER_ZONE];
             defmt::assert!(
                 d > 10 && d < 4000,
                 "zone {} distance {} mm out of range",
@@ -276,7 +278,9 @@ mod tests {
         sensor.poll_data_ready().await.unwrap();
 
         let data = sensor.get_ranging_data().await.unwrap();
-        for (i, &d) in data.distance_mm[..64].iter().enumerate() {
+        // First (closest/strongest) target of each zone: entry zone * N.
+        for i in 0..64 {
+            let d = data.distance_mm[i * NB_TARGET_PER_ZONE];
             defmt::assert!(
                 d > 10 && d < 4000,
                 "zone {} distance {} mm out of range",

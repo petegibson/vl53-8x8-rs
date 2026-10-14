@@ -25,6 +25,10 @@ defmt-bus-trace = ["vl53-8x8/defmt"]
 xtalk = ["vl53-8x8/xtalk"]
 motion = ["vl53-8x8/motion"]
 thresholds = ["vl53-8x8/thresholds"]
+# Targets per zone (default 1); mutually exclusive, forwarded to the driver.
+targets-2 = ["vl53-8x8/targets-2"]
+targets-3 = ["vl53-8x8/targets-3"]
+targets-4 = ["vl53-8x8/targets-4"]
 
 [[bin]]
 name = "nucleo-f401re-async"

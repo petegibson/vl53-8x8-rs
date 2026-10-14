@@ -20,7 +20,9 @@ Python 3 standard library only.
 The configuration table contains one preprocessor macro,
 `VL53L8CX_FW_NBTAR_RANGING`, which the ULD defines as 2 for a one-target-per-
 zone build and as `VL53L8CX_NB_TARGET_PER_ZONE` otherwise. The sys crate has
-always been built for one target, so it is resolved to 2 here.
+always been built for one target, so it is resolved to 2 here; the driver's
+`sensor::NB_TARGET_CONFIG_PATCH` overwrites that byte at init for the
+`targets-2/3/4` features.
 """
 
 import argparse
@@ -106,7 +108,8 @@ def render_rust(arrays, header_rel, revision):
         for idx, macro in macro_uses:
             out.append(f"///")
             out.append(f"/// Byte {idx} is the ULD macro `{macro}`, resolved to {MACROS[macro]}")
-            out.append(f"/// (one target per zone).")
+            out.append(f"/// (one target per zone); `sensor::NB_TARGET_CONFIG_PATCH` overrides it")
+            out.append(f"/// for the multi-target features.")
         out.append(f"pub(crate) const {rust_name}: [u8; {len(data)}] = [")
         for i in range(0, len(data), 16):
             chunk = ", ".join(f"0x{b:02X}" for b in data[i : i + 16])

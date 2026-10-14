@@ -68,6 +68,12 @@ pub use results::ResultsData;
 #[cfg(all(feature = "motion", not(feature = "disable-motion-indicator-output")))]
 pub use results::MotionIndicator;
 
+/// Targets reported per zone (the ULD's `VL53L8CX_NB_TARGET_PER_ZONE`): 1 by
+/// default, or 2/3/4 with the matching `targets-N` feature. It is the stride of
+/// the per-target arrays in [`ResultsData`]: entry `zone * NB_TARGET_PER_ZONE +
+/// target`.
+pub const NB_TARGET_PER_ZONE: usize = consts::NB_TARGET_PER_ZONE as usize;
+
 #[cfg(feature = "thresholds")]
 pub use types::{
     DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType,
@@ -913,6 +919,40 @@ where
             unsafe { core::mem::transmute(buf) };
         Self::scale_thresholds_for_read(&mut thresholds);
         Ok(thresholds)
+    }
+
+    /// Read the detection-thresholds auto-stop flag (VL53L8CX only).
+    ///
+    /// See [`Sensor::set_detection_thresholds_auto_stop`]. Returns
+    /// [`FirmwareError::InvalidParam`] on a VL53L5CX, whose ULD has no such
+    /// function.
+    pub async fn get_detection_thresholds_auto_stop(&mut self) -> Result<bool, Error<BUS::Error>> {
+        if !self.variant.info().has_threshold_auto_stop {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+        ops::get_detection_thresholds_auto_stop(
+            &mut self.bus, self.address, &mut self.delay, &mut self.stdev,
+        ).await
+    }
+
+    /// Enable or disable the detection-thresholds auto-stop (VL53L8CX only;
+    /// default off).
+    ///
+    /// In autonomous ranging with detection thresholds enabled the sensor only
+    /// raises INT when a threshold is met, at the end of the measurement. With
+    /// auto-stop on it raises INT and aborts the measurement in progress
+    /// straight away; [`Sensor::stop_ranging`] must still be called afterwards
+    /// for a clean stop, and it skips the MCU-stop handshake when this flag is
+    /// set. Ports `vl53l8cx_set_detection_thresholds_auto_stop`. Returns
+    /// [`FirmwareError::InvalidParam`] on a VL53L5CX, whose ULD has no such
+    /// function.
+    pub async fn set_detection_thresholds_auto_stop(&mut self, enabled: bool) -> Result<(), Error<BUS::Error>> {
+        if !self.variant.info().has_threshold_auto_stop {
+            return Err(Error::Firmware(FirmwareError::InvalidParam));
+        }
+        ops::set_detection_thresholds_auto_stop(
+            &mut self.bus, self.address, &mut self.delay, &mut self.stdev, enabled,
+        ).await
     }
 
     pub async fn set_detection_thresholds(

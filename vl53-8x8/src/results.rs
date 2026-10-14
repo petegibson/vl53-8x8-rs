@@ -36,6 +36,19 @@ const TARGETS: usize = ZONES * NB_TARGET_PER_ZONE as usize;
 /// present or absent according to the `disable-*` and `motion` features; see
 /// the module docs for the mapping.
 ///
+/// # Indexing
+///
+/// Per-zone arrays (`ambient_per_spad`, `nb_target_detected`,
+/// `nb_spads_enabled`) have one entry per zone, indexed by zone number.
+///
+/// Per-target arrays (`signal_per_spad`, `range_sigma_mm`, `distance_mm`,
+/// `reflectance`, `target_status`) hold `64 * NB_TARGET_PER_ZONE` entries,
+/// laid out as in the ULD: entry `zone * NB_TARGET_PER_ZONE + target`, with
+/// `target` in `0..nb_target_detected[zone]` valid and the rest unspecified
+/// (`target_status` is forced to 255 for zones with no target). With the default
+/// single target per zone this reduces to indexing by zone. The crate-root
+/// constant [`crate::NB_TARGET_PER_ZONE`] gives the stride.
+///
 /// Unless the `raw-format` feature is enabled, values are converted to the
 /// units given on each field, as the ULD does.
 #[repr(C)]

@@ -1,6 +1,6 @@
 use crate::bus::VlBusAsync;
 use crate::firmware::FirmwareSource;
-use crate::sensor::{SensorInfo, Variant};
+use crate::sensor::{SensorInfo, Variant, NB_TARGET_CONFIG_PATCH};
 use embedded_hal::i2c::SevenBitAddress;
 use embedded_hal_async::delay::DelayNs;
 use crate::consts::*;
@@ -620,10 +620,15 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     .await?;
 
     // Send default configuration. The shared base is the L8 blob; apply the
-    // variant config overlay (5 bytes for L5) into temp_buffer before sending.
+    // variant config overlay (5 bytes for L5) into temp_buffer before sending,
+    // then the target-count overlay (byte 107, `VL53L8CX_FW_NBTAR_RANGING`,
+    // only non-empty for `targets-2/3/4`). The two never overlap.
     let cfg_len = VL53L8CX_CONFIGURATION_SIZE as usize;
     stdev.temp_buffer[..cfg_len].copy_from_slice(&DEFAULT_CONFIGURATION);
     for &(off, val) in info.config_patch {
+        stdev.temp_buffer[off] = val;
+    }
+    for &(off, val) in NB_TARGET_CONFIG_PATCH {
         stdev.temp_buffer[off] = val;
     }
     bus.write(addr, 0x2C34, &stdev.temp_buffer[..cfg_len])
@@ -654,6 +659,26 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
         4,
     )
     .await?;
+
+    // Multi-target builds also program the firmware's target count: byte 0x0C
+    // of the 16-byte `VL53L8CX_DCI_FW_NB_TARGET` block (`vl53l8cx_api.c`
+    // lines 396-401, under `#if VL53L8CX_NB_TARGET_PER_ZONE != 1`; the L5 ULD
+    // has the identical block). Skipped for one target, as in the ULD.
+    if NB_TARGET_PER_ZONE != 1 {
+        let mut fw_nb_target = [0u8; 16];
+        dci_replace(
+            bus,
+            addr,
+            delay,
+            &mut stdev.temp_buffer,
+            &mut fw_nb_target,
+            VL53L8CX_DCI_FW_NB_TARGET as u32,
+            16,
+            &[NB_TARGET_PER_ZONE],
+            0x0C,
+        )
+        .await?;
+    }
 
     // Single range
     let mut single_range = 0x01u32.to_le_bytes();
@@ -984,22 +1009,11 @@ pub async fn start_ranging<BUS: VlBusAsync, D: DelayNs>(
     // Output block header enables (mandatory: meta, common data, start)
     let mut output_bh_enable: [u32; 4] = [0x00000007, 0x00000000, 0x00000000, 0xC0000000];
 
-    // Output block headers — use the exact constants from vl53l8cx_api.h / platform.h.
-    // Format: idx(16) | size(12) | type(4), little-endian u32.
-    let mut output: [u32; 12] = [
-        0x0000000D, // START_BH
-        0x54B400C0, // METADATA_BH
-        0x54C00040, // COMMONDATA_BH
-        0x54D00104, // AMBIENT_RATE_BH
-        0x55D00404, // SPAD_COUNT_BH
-        0xDB840401, // NB_TARGET_DETECTED_BH
-        0xDBC40404, // SIGNAL_RATE_BH
-        0xDEC40402, // RANGE_SIGMA_MM_BH
-        0xDF440402, // DISTANCE_BH
-        0xE0440401, // REFLECTANCE_EST_PC_BH
-        0xE0840401, // TARGET_STATUS_BH
-        0xD85808C0, // MOTION_DETECT_BH
-    ];
+    // Output block headers: the `*_BH` set for this build's target count
+    // (`consts::OUTPUT_BLOCK_HEADERS`, from vl53l8cx_api.h lines 101-151).
+    // Format: idx(16) | size(12) | type(4), little-endian u32. The size field
+    // is rewritten below for the current resolution and target count.
+    let mut output: [u32; 12] = OUTPUT_BLOCK_HEADERS;
 
     // Enable selected outputs (matching C #ifndef guards)
     #[cfg(not(feature = "disable-ambient"))]
@@ -1215,6 +1229,59 @@ pub async fn stop_ranging<BUS: VlBusAsync, D: DelayNs>(
     bus.write_byte(addr, 0x09, 0x04).await.map_err(Error::Bus)?;
     bus.write_byte(addr, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
 
+    Ok(())
+}
+
+/// Read the detection-thresholds auto-stop flag: byte 3 of the 4-byte
+/// `VL53L8CX_DCI_PIPE_CONTROL` block (`vl53l8cx_plugin_detection_thresholds.c`,
+/// `vl53l8cx_get_detection_thresholds_auto_stop`, lines 162-173).
+#[cfg(feature = "thresholds")]
+pub async fn get_detection_thresholds_auto_stop<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    stdev: &mut State,
+) -> Result<bool, Error<BUS::Error>> {
+    let mut pipe_ctrl = [0u8; 4];
+    dci_read(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut pipe_ctrl,
+        VL53L8CX_DCI_PIPE_CONTROL as u32,
+        4,
+    )
+    .await?;
+    Ok(pipe_ctrl[0x3] != 0)
+}
+
+/// Write the detection-thresholds auto-stop flag (byte 3 of
+/// `VL53L8CX_DCI_PIPE_CONTROL`) and mirror it into `State::is_auto_stop_enabled`,
+/// which `stop_ranging` consults (`vl53l8cx_plugin_detection_thresholds.c`,
+/// `vl53l8cx_set_detection_thresholds_auto_stop`, lines 175-187).
+#[cfg(feature = "thresholds")]
+pub async fn set_detection_thresholds_auto_stop<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    stdev: &mut State,
+    enabled: bool,
+) -> Result<(), Error<BUS::Error>> {
+    let mut pipe_ctrl = [0u8; 4];
+    dci_replace(
+        bus,
+        addr,
+        delay,
+        &mut stdev.temp_buffer,
+        &mut pipe_ctrl,
+        VL53L8CX_DCI_PIPE_CONTROL as u32,
+        4,
+        &[enabled as u8],
+        0x03,
+    )
+    .await?;
+    stdev.is_auto_stop_enabled = enabled;
     Ok(())
 }
 

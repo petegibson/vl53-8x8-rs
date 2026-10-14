@@ -5,7 +5,7 @@ use defmt_rtt as _;
 
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_time::Delay;
-use vl53_8x8::Resolution;
+use vl53_8x8::{Resolution, NB_TARGET_PER_ZONE};
 
 #[cfg(feature = "thresholds")]
 use vl53_8x8::{
@@ -289,7 +289,9 @@ mod tests {
         sensor.wait_for_data_ready_blocking().unwrap();
 
         let data = sensor.get_ranging_data().await.unwrap();
-        for (i, &d) in data.distance_mm[..16].iter().enumerate() {
+        // First (closest/strongest) target of each zone: entry zone * N.
+        for i in 0..16 {
+            let d = data.distance_mm[i * NB_TARGET_PER_ZONE];
             defmt::assert!(
                 d > 10 && d < 4000,
                 "zone {} distance {} mm out of range",
@@ -312,6 +314,24 @@ mod tests {
 
         sensor.set_detection_thresholds_enable(false).await.unwrap();
         defmt::assert!(!sensor.get_detection_thresholds_enable().await.unwrap());
+    }
+
+    /// Auto-stop is a VL53L8CX-only plugin function (the L5 ULD lacks it); the
+    /// Nucleo shield carries an L8, so the round trip must succeed.
+    #[cfg(feature = "thresholds")]
+    #[test]
+    #[timeout(10)]
+    async fn test_detection_thresholds_auto_stop(mut sensor: Sensor) {
+        sensor.init().await.unwrap();
+
+        // Default after init is off.
+        defmt::assert!(!sensor.get_detection_thresholds_auto_stop().await.unwrap());
+
+        sensor.set_detection_thresholds_auto_stop(true).await.unwrap();
+        defmt::assert!(sensor.get_detection_thresholds_auto_stop().await.unwrap());
+
+        sensor.set_detection_thresholds_auto_stop(false).await.unwrap();
+        defmt::assert!(!sensor.get_detection_thresholds_auto_stop().await.unwrap());
     }
 
     #[cfg(feature = "thresholds")]

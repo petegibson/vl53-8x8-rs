@@ -14,7 +14,7 @@
 use crate::bus::VlBusAsync;
 use crate::firmware::{PatchedFirmware, BASE_FIRMWARE};
 use embedded_hal::i2c::SevenBitAddress;
-use crate::consts::VL53L8CX_FW_CHECKSUM;
+use crate::consts::{NB_TARGET_PER_ZONE, VL53L8CX_FW_CHECKSUM};
 use vl53_8x8_types::Error;
 
 /// Device id register (reg 0) value common to both supported parts.
@@ -41,7 +41,8 @@ pub const L8_FW_PATCH: &[(usize, u8)] = &[];
 /// Patch overlaying the shared (L8) `DEFAULT_CONFIGURATION` to produce the
 /// VL53L5CX default configuration. Five bytes in the 972-byte blob. Offsets are
 /// in the fully-resolved array (the `FW_NBTAR_RANGING` macro at index 107 is the
-/// same value on both parts). Verified against ST ULD 2.0.1.
+/// same value on both parts and is handled separately by
+/// [`NB_TARGET_CONFIG_PATCH`]). Verified against ST ULD 2.0.1.
 pub const L5_CONFIG_PATCH: &[(usize, u8)] = &[
     (0x01EE, 0x0C),
     (0x01EF, 0xCD),
@@ -52,6 +53,27 @@ pub const L5_CONFIG_PATCH: &[(usize, u8)] = &[
 
 /// Empty overlay: the shared default configuration is already the L8 one.
 pub const L8_CONFIG_PATCH: &[(usize, u8)] = &[];
+
+/// Patch applied to the default configuration, after the variant patch, when
+/// the crate is built for more than one target per zone (`targets-2/3/4`).
+///
+/// Byte 107 of the 972-byte `DEFAULT_CONFIGURATION` is the only preprocessor
+/// macro in ST's table: element 107 of `VL53L8CX_DEFAULT_CONFIGURATION[]`
+/// (`vl53l8cx_buffers.h` line 21546 onwards) is `VL53L8CX_FW_NBTAR_RANGING`,
+/// which lines 24-28 of that header define as `2` when
+/// `VL53L8CX_NB_TARGET_PER_ZONE == 1` and as `VL53L8CX_NB_TARGET_PER_ZONE`
+/// otherwise. `vl53l5cx_buffers.h` (lines 24-28, array element 107) has the
+/// identical macro at the identical index, so one patch serves both parts.
+/// The generated table in `uld_data.rs` carries the single-target value `2`;
+/// this overlay is empty for one target and `[(107, N)]` for `N > 1`.
+pub const NB_TARGET_CONFIG_PATCH: &[(usize, u8)] = if NB_TARGET_PER_ZONE == 1 {
+    &[]
+} else {
+    &[(FW_NBTAR_RANGING_INDEX, NB_TARGET_PER_ZONE)]
+};
+
+/// Index of the `VL53L8CX_FW_NBTAR_RANGING` macro inside `DEFAULT_CONFIGURATION`.
+pub const FW_NBTAR_RANGING_INDEX: usize = 107;
 
 /// A supported sensor variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +114,10 @@ pub struct SensorInfo {
     pub has_sync_pin: bool,
     /// Whether the part has internal charge-pump control (L5 only).
     pub has_internal_cp: bool,
+    /// Whether the detection-thresholds plugin offers the auto-stop flag
+    /// (`vl53l8cx_{get,set}_detection_thresholds_auto_stop`; L8 only, the
+    /// VL53L5CX ULD has no such function).
+    pub has_threshold_auto_stop: bool,
 }
 
 const L5_INFO: SensorInfo = SensorInfo {
@@ -106,6 +132,7 @@ const L5_INFO: SensorInfo = SensorInfo {
     has_deep_sleep: false,
     has_sync_pin: false,
     has_internal_cp: true,
+    has_threshold_auto_stop: false,
 };
 
 const L8_INFO: SensorInfo = SensorInfo {
@@ -120,6 +147,7 @@ const L8_INFO: SensorInfo = SensorInfo {
     has_deep_sleep: true,
     has_sync_pin: true,
     has_internal_cp: false,
+    has_threshold_auto_stop: true,
 };
 
 impl Variant {
@@ -262,6 +290,7 @@ mod tests {
         // L8-only behaviours.
         assert!(l8.has_laser_safety_check && l8.has_deep_sleep && l8.has_sync_pin);
         assert!(!l5.has_laser_safety_check && !l5.has_deep_sleep && !l5.has_sync_pin);
+        assert!(l8.has_threshold_auto_stop && !l5.has_threshold_auto_stop);
     }
 
     #[test]
@@ -271,5 +300,20 @@ mod tests {
         assert_eq!(p.len(), 5);
         // Every patch offset must lie inside the 972-byte config blob.
         assert!(p.iter().all(|&(o, _)| o < 972));
+        // The L5 patch never touches the target-count byte, so the two
+        // overlays commute and `NB_TARGET_CONFIG_PATCH` can be applied last.
+        assert!(p.iter().all(|&(o, _)| o != FW_NBTAR_RANGING_INDEX));
+    }
+
+    #[test]
+    fn nb_target_config_patch_tracks_target_count() {
+        if NB_TARGET_PER_ZONE == 1 {
+            assert!(NB_TARGET_CONFIG_PATCH.is_empty());
+        } else {
+            assert_eq!(
+                NB_TARGET_CONFIG_PATCH,
+                &[(FW_NBTAR_RANGING_INDEX, NB_TARGET_PER_ZONE)]
+            );
+        }
     }
 }

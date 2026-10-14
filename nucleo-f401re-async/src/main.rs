@@ -7,7 +7,7 @@ use panic_probe as _;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_time::Delay;
-use vl53_8x8::{Resolution, Sensor};
+use vl53_8x8::{Resolution, Sensor, NB_TARGET_PER_ZONE};
 
 // --- Configuration ---
 const RESOLUTION: Resolution = Resolution::Res4x4;
@@ -185,26 +185,28 @@ async fn main(_spawner: Spawner) {
         match sensor.get_ranging_data().await {
             Ok(data) => {
                 defmt::info!("--- Distance (mm) ---");
+                // First target of each zone (per-target arrays are strided by N).
+                let d = |zone: usize| data.distance_mm[zone * NB_TARGET_PER_ZONE];
                 for row in 0..grid {
                     let b = row * grid;
                     match grid {
                         4 => defmt::info!(
                             "  {} {} {} {}",
-                            data.distance_mm[b],
-                            data.distance_mm[b + 1],
-                            data.distance_mm[b + 2],
-                            data.distance_mm[b + 3],
+                            d(b),
+                            d(b + 1),
+                            d(b + 2),
+                            d(b + 3),
                         ),
                         _ => defmt::info!(
                             "  {} {} {} {} {} {} {} {}",
-                            data.distance_mm[b],
-                            data.distance_mm[b + 1],
-                            data.distance_mm[b + 2],
-                            data.distance_mm[b + 3],
-                            data.distance_mm[b + 4],
-                            data.distance_mm[b + 5],
-                            data.distance_mm[b + 6],
-                            data.distance_mm[b + 7],
+                            d(b),
+                            d(b + 1),
+                            d(b + 2),
+                            d(b + 3),
+                            d(b + 4),
+                            d(b + 5),
+                            d(b + 6),
+                            d(b + 7),
                         ),
                     }
                 }

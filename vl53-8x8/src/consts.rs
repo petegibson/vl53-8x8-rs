@@ -4,7 +4,8 @@
 //! `vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/inc/`:
 //!
 //! - `vl53l8cx_api.h`: UI command registers, buffer sizes, DCI indices,
-//!   result block-header indices, `VL53L8CX_TEMPORARY_BUFFER_SIZE` formula.
+//!   result block headers (one set per `VL53L8CX_NB_TARGET_PER_ZONE` case),
+//!   `VL53L8CX_TEMPORARY_BUFFER_SIZE` formula.
 //! - `vl53l8cx_plugin_xtalk.h`: `VL53L8CX_DCI_CAL_CFG`, `VL53L8CX_DCI_XTALK_CFG`.
 //! - `vl53l8cx_plugin_detection_thresholds.h`: `VL53L8CX_DCI_DET_THRESH_*`.
 //! - `src/vl53l8cx_api.c` (`vl53l8cx_init`): the firmware CRC literal.
@@ -20,29 +21,30 @@
 
 // --- Build configuration ---------------------------------------------------
 
+#[cfg(any(
+    all(feature = "targets-1", feature = "targets-2"),
+    all(feature = "targets-1", feature = "targets-3"),
+    all(feature = "targets-1", feature = "targets-4"),
+    all(feature = "targets-2", feature = "targets-3"),
+    all(feature = "targets-2", feature = "targets-4"),
+    all(feature = "targets-3", feature = "targets-4"),
+))]
+compile_error!(
+    "vl53-8x8: the `targets-1`, `targets-2`, `targets-3` and `targets-4` features are mutually \
+     exclusive (each fixes the ULD's VL53L8CX_NB_TARGET_PER_ZONE); enable at most one"
+);
+
 /// Number of targets reported per zone (`VL53L8CX_NB_TARGET_PER_ZONE`).
-/// Selected by the `targets-N` features; 1 when none is set.
-pub(crate) const NB_TARGET_PER_ZONE: u8 = {
-    #[cfg(feature = "targets-4")]
-    {
-        4
-    }
-    #[cfg(all(feature = "targets-3", not(feature = "targets-4")))]
-    {
-        3
-    }
-    #[cfg(all(
-        feature = "targets-2",
-        not(feature = "targets-3"),
-        not(feature = "targets-4")
-    ))]
-    {
-        2
-    }
-    #[cfg(not(any(feature = "targets-2", feature = "targets-3", feature = "targets-4")))]
-    {
-        1
-    }
+/// Selected by the `targets-N` features; 1 when none is set. The features are
+/// mutually exclusive (see the `compile_error!` above), so this is a plain chain.
+pub(crate) const NB_TARGET_PER_ZONE: u8 = if cfg!(feature = "targets-4") {
+    4
+} else if cfg!(feature = "targets-3") {
+    3
+} else if cfg!(feature = "targets-2") {
+    2
+} else {
+    1
 };
 
 // --- UI command registers ----------------------------------------------------
@@ -94,21 +96,96 @@ pub(crate) const VL53L8CX_DCI_DET_THRESH_GLOBAL_CONFIG: u16 = 0xB6E0;
 pub(crate) const VL53L8CX_DCI_DET_THRESH_START: u16 = 0xB6E8;
 pub(crate) const VL53L8CX_DCI_DET_THRESH_VALID_STATUS: u16 = 0xB9F0;
 
-// --- Result block-header indices (`VL53L8CX_NB_TARGET_PER_ZONE == 1` set) -------
+// --- Result block headers -----------------------------------------------------
 //
-// The ULD has a second set of values for multi-target builds; `start_ranging`
-// in `ops.rs` likewise programs the single-target block-header list.
+// `vl53l8cx_api.h` lines 101-151 carry two sets of block-header values: one
+// under `#if VL53L8CX_NB_TARGET_PER_ZONE == 1` (`*_BH` lines 103-114, `*_IDX`
+// lines 116-125) and another under `#else` for multi-target builds (`*_BH`
+// lines 128-139, `*_IDX` lines 141-150). `vl53l8cx_start_ranging` programs the
+// `*_BH` words as the output list and `vl53l8cx_get_ranging_data` matches
+// result blocks on the `*_IDX` values, both by macro name, so the port selects
+// the set from the `targets-N` features and uses it in the same two places.
+//
+// `*_BH` is a packed block header, `idx(16) | size(12) | type(4)`; the upper
+// half of each `*_BH` equals the matching `*_IDX` (checked by the tests).
+// bindgen does not emit these cast macros, so the oracle tests compare them
+// against literals copied from the header lines cited above.
 
-pub(crate) const VL53L8CX_METADATA_IDX: u16 = 0x54B4;
-pub(crate) const VL53L8CX_SPAD_COUNT_IDX: u16 = 0x55D0;
-pub(crate) const VL53L8CX_AMBIENT_RATE_IDX: u16 = 0x54D0;
-pub(crate) const VL53L8CX_NB_TARGET_DETECTED_IDX: u16 = 0xDB84;
-pub(crate) const VL53L8CX_SIGNAL_RATE_IDX: u16 = 0xDBC4;
-pub(crate) const VL53L8CX_RANGE_SIGMA_MM_IDX: u16 = 0xDEC4;
-pub(crate) const VL53L8CX_DISTANCE_IDX: u16 = 0xDF44;
-pub(crate) const VL53L8CX_REFLECTANCE_EST_PC_IDX: u16 = 0xE044;
-pub(crate) const VL53L8CX_TARGET_STATUS_IDX: u16 = 0xE084;
-pub(crate) const VL53L8CX_MOTION_DETEC_IDX: u16 = 0xD858;
+#[cfg(not(any(feature = "targets-2", feature = "targets-3", feature = "targets-4")))]
+mod block_headers {
+    // `VL53L8CX_NB_TARGET_PER_ZONE == 1` (`vl53l8cx_api.h` lines 103-125).
+    pub(crate) const VL53L8CX_START_BH: u32 = 0x0000000D;
+    pub(crate) const VL53L8CX_METADATA_BH: u32 = 0x54B400C0;
+    pub(crate) const VL53L8CX_COMMONDATA_BH: u32 = 0x54C00040;
+    pub(crate) const VL53L8CX_AMBIENT_RATE_BH: u32 = 0x54D00104;
+    pub(crate) const VL53L8CX_SPAD_COUNT_BH: u32 = 0x55D00404;
+    pub(crate) const VL53L8CX_NB_TARGET_DETECTED_BH: u32 = 0xDB840401;
+    pub(crate) const VL53L8CX_SIGNAL_RATE_BH: u32 = 0xDBC40404;
+    pub(crate) const VL53L8CX_RANGE_SIGMA_MM_BH: u32 = 0xDEC40402;
+    pub(crate) const VL53L8CX_DISTANCE_BH: u32 = 0xDF440402;
+    pub(crate) const VL53L8CX_REFLECTANCE_BH: u32 = 0xE0440401;
+    pub(crate) const VL53L8CX_TARGET_STATUS_BH: u32 = 0xE0840401;
+    pub(crate) const VL53L8CX_MOTION_DETECT_BH: u32 = 0xD85808C0;
+
+    pub(crate) const VL53L8CX_METADATA_IDX: u16 = 0x54B4;
+    pub(crate) const VL53L8CX_SPAD_COUNT_IDX: u16 = 0x55D0;
+    pub(crate) const VL53L8CX_AMBIENT_RATE_IDX: u16 = 0x54D0;
+    pub(crate) const VL53L8CX_NB_TARGET_DETECTED_IDX: u16 = 0xDB84;
+    pub(crate) const VL53L8CX_SIGNAL_RATE_IDX: u16 = 0xDBC4;
+    pub(crate) const VL53L8CX_RANGE_SIGMA_MM_IDX: u16 = 0xDEC4;
+    pub(crate) const VL53L8CX_DISTANCE_IDX: u16 = 0xDF44;
+    pub(crate) const VL53L8CX_REFLECTANCE_EST_PC_IDX: u16 = 0xE044;
+    pub(crate) const VL53L8CX_TARGET_STATUS_IDX: u16 = 0xE084;
+    pub(crate) const VL53L8CX_MOTION_DETEC_IDX: u16 = 0xD858;
+}
+
+#[cfg(any(feature = "targets-2", feature = "targets-3", feature = "targets-4"))]
+mod block_headers {
+    // `VL53L8CX_NB_TARGET_PER_ZONE != 1` (`vl53l8cx_api.h` lines 128-150).
+    pub(crate) const VL53L8CX_START_BH: u32 = 0x0000000D;
+    pub(crate) const VL53L8CX_METADATA_BH: u32 = 0x54B400C0;
+    pub(crate) const VL53L8CX_COMMONDATA_BH: u32 = 0x54C00040;
+    pub(crate) const VL53L8CX_AMBIENT_RATE_BH: u32 = 0x54D00104;
+    pub(crate) const VL53L8CX_SPAD_COUNT_BH: u32 = 0x55D00404;
+    pub(crate) const VL53L8CX_NB_TARGET_DETECTED_BH: u32 = 0x57D00401;
+    pub(crate) const VL53L8CX_SIGNAL_RATE_BH: u32 = 0x58900404;
+    pub(crate) const VL53L8CX_RANGE_SIGMA_MM_BH: u32 = 0x64900402;
+    pub(crate) const VL53L8CX_DISTANCE_BH: u32 = 0x66900402;
+    pub(crate) const VL53L8CX_REFLECTANCE_BH: u32 = 0x6A900401;
+    pub(crate) const VL53L8CX_TARGET_STATUS_BH: u32 = 0x6B900401;
+    pub(crate) const VL53L8CX_MOTION_DETECT_BH: u32 = 0xCC5008C0;
+
+    pub(crate) const VL53L8CX_METADATA_IDX: u16 = 0x54B4;
+    pub(crate) const VL53L8CX_SPAD_COUNT_IDX: u16 = 0x55D0;
+    pub(crate) const VL53L8CX_AMBIENT_RATE_IDX: u16 = 0x54D0;
+    pub(crate) const VL53L8CX_NB_TARGET_DETECTED_IDX: u16 = 0x57D0;
+    pub(crate) const VL53L8CX_SIGNAL_RATE_IDX: u16 = 0x5890;
+    pub(crate) const VL53L8CX_RANGE_SIGMA_MM_IDX: u16 = 0x6490;
+    pub(crate) const VL53L8CX_DISTANCE_IDX: u16 = 0x6690;
+    pub(crate) const VL53L8CX_REFLECTANCE_EST_PC_IDX: u16 = 0x6A90;
+    pub(crate) const VL53L8CX_TARGET_STATUS_IDX: u16 = 0x6B90;
+    pub(crate) const VL53L8CX_MOTION_DETEC_IDX: u16 = 0xCC50;
+}
+
+pub(crate) use block_headers::*;
+
+/// The output list `vl53l8cx_start_ranging` programs into
+/// `VL53L8CX_DCI_OUTPUT_LIST` (`vl53l8cx_api.c`, the `output[]` array), in the
+/// ULD's order. Bit `i` of the first output-enable word selects entry `i`.
+pub(crate) const OUTPUT_BLOCK_HEADERS: [u32; 12] = [
+    VL53L8CX_START_BH,
+    VL53L8CX_METADATA_BH,
+    VL53L8CX_COMMONDATA_BH,
+    VL53L8CX_AMBIENT_RATE_BH,
+    VL53L8CX_SPAD_COUNT_BH,
+    VL53L8CX_NB_TARGET_DETECTED_BH,
+    VL53L8CX_SIGNAL_RATE_BH,
+    VL53L8CX_RANGE_SIGMA_MM_BH,
+    VL53L8CX_DISTANCE_BH,
+    VL53L8CX_REFLECTANCE_BH,
+    VL53L8CX_TARGET_STATUS_BH,
+    VL53L8CX_MOTION_DETECT_BH,
+];
 
 // --- Temporary buffer size ------------------------------------------------------
 //

@@ -47,6 +47,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Timer};
 use vl53_8x8::{
     Error, FirmwareError, ResultsData, Resolution, SevenBitAddress, DEFAULT_ADDRESS,
+    NB_TARGET_PER_ZONE,
 };
 
 // --- Configuration ---
@@ -277,10 +278,12 @@ async fn read_and_report(
     s.poll_data_ready().await?;
     let data = s.get_ranging_data().await?;
 
-    let zones = grid * grid;
-    let object_near = data.distance_mm[..zones]
+    // Per-target arrays are strided by NB_TARGET_PER_ZONE; look at every
+    // target of every populated zone.
+    let entries = grid * grid * NB_TARGET_PER_ZONE;
+    let object_near = data.distance_mm[..entries]
         .iter()
-        .zip(data.target_status[..zones].iter())
+        .zip(data.target_status[..entries].iter())
         .any(|(&d, &status)| status == STATUS_VALID && d > 0 && d <= OBJECT_THRESHOLD_MM);
 
     log_grid(label, &data, grid, object_near);
@@ -294,21 +297,22 @@ fn log_grid(label: &str, data: &ResultsData, grid: usize, object_near: bool) {
         label,
         if object_near { "  [OBJECT <200mm]" } else { "" }
     );
-    let d = &data.distance_mm;
+    // First target of each zone (entry zone * NB_TARGET_PER_ZONE).
+    let d = |zone: usize| data.distance_mm[zone * NB_TARGET_PER_ZONE];
     for row in 0..grid {
         let b = row * grid;
         match grid {
-            4 => defmt::info!("  {} {} {} {}", d[b], d[b + 1], d[b + 2], d[b + 3]),
+            4 => defmt::info!("  {} {} {} {}", d(b), d(b + 1), d(b + 2), d(b + 3)),
             _ => defmt::info!(
                 "  {} {} {} {} {} {} {} {}",
-                d[b],
-                d[b + 1],
-                d[b + 2],
-                d[b + 3],
-                d[b + 4],
-                d[b + 5],
-                d[b + 6],
-                d[b + 7],
+                d(b),
+                d(b + 1),
+                d(b + 2),
+                d(b + 3),
+                d(b + 4),
+                d(b + 5),
+                d(b + 6),
+                d(b + 7),
             ),
         }
     }

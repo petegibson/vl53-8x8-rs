@@ -67,23 +67,36 @@ loop {
 
 | Feature                              | Effect                                                            |
 | ------------------------------------ | ----------------------------------------------------------------- |
-| `xtalk`                              | Crosstalk calibration (`calibrate_xtalk`, `get/set_caldata_xtalk`) |
+| `xtalk`                              | Crosstalk margin and calibration data (`get/set_xtalk_margin`, `get/set_caldata_xtalk`) |
 | `motion`                             | Motion indicator plugin and the `motion_indicator` result field   |
-| `thresholds`                         | Per-zone detection thresholds                                     |
+| `thresholds`                         | Per-zone detection thresholds, incl. auto-stop (VL53L8CX only)    |
 | `raw-format`                         | Return the sensor's fixed-point units instead of mm / kcps / %    |
-| `targets-2`, `targets-3`, `targets-4` | Targets per zone (default 1). **Untested on hardware**, see below |
+| `targets-2`, `targets-3`, `targets-4` | Targets per zone (default 1); mutually exclusive. See below       |
 | `disable-*`                          | Drop a result field to shrink frames and `ResultsData`            |
 | `defmt`                              | `defmt` trace logging of bus traffic                              |
 
 ### Multi-target builds
 
-The `targets-N` features size `ResultsData` and the result parser for N
-targets per zone, but the generated default-configuration table
-(`src/uld_data.rs`) is produced for the **single-target** ULD build: the
-ULD's `VL53L8CX_FW_NBTAR_RANGING` macro inside that table is resolved to its
-one-target value. Multi-target operation has not been exercised on hardware
-and the oracle layout tests only run under the default feature set. Treat
-`targets-2/3/4` as experimental.
+The `targets-N` features set the ULD's `VL53L8CX_NB_TARGET_PER_ZONE` for the
+whole driver, following the C sources:
+
+- `ResultsData` per-target arrays hold `64 * N` entries, indexed
+  `zone * NB_TARGET_PER_ZONE + target` (the stride is exported as
+  `vl53_8x8::NB_TARGET_PER_ZONE`); frame and scratch-buffer sizes follow.
+- The multi-target set of result block headers (`vl53l8cx_api.h`, the
+  `#else` branch) is used for both the output list `start_ranging` programs
+  and the block indices `get_ranging_data` parses.
+- At init, byte 107 of the default configuration (the ULD's
+  `VL53L8CX_FW_NBTAR_RANGING` macro, generated for one target) is overwritten
+  with N by `sensor::NB_TARGET_CONFIG_PATCH`, and the firmware target count
+  DCI (`VL53L8CX_DCI_FW_NB_TARGET`) is written as the ULD does for `N != 1`.
+
+Enabling more than one `targets-N` feature is a compile error. The
+single-target build is checked against the C ULD by the oracle tests; the
+multi-target constants are checked against the header's literal values. The
+`targets-2` build has been compiled for the demo boards but **not yet
+exercised with a real multi-target scene**; treat `targets-2/3/4` as
+experimental until that is done.
 
 ## ST data tables and regeneration
 

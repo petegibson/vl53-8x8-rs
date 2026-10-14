@@ -17,7 +17,7 @@ use embassy_stm32::i2c::{Config as I2cConfig, I2c};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::{bind_interrupts, dma, i2c, peripherals};
 use embassy_time::Delay;
-use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder, Variant};
+use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder, Variant, NB_TARGET_PER_ZONE};
 
 bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
@@ -143,7 +143,9 @@ mod tests {
         sensor.poll_data_ready().await.unwrap();
 
         let data = sensor.get_ranging_data().await.unwrap();
-        for (i, &d) in data.distance_mm[..16].iter().enumerate() {
+        // First target of each zone: entry zone * N (see `ResultsData` docs).
+        for i in 0..16 {
+            let d = data.distance_mm[i * NB_TARGET_PER_ZONE];
             defmt::assert!(d < 8000, "zone {} distance {} mm implausible (bad read?)", i, d);
         }
         sensor.stop_ranging().await.unwrap();
@@ -160,7 +162,9 @@ mod tests {
         sensor.poll_data_ready().await.unwrap();
 
         let data = sensor.get_ranging_data().await.unwrap();
-        for (i, &d) in data.distance_mm[..64].iter().enumerate() {
+        // First target of each zone: entry zone * N (see `ResultsData` docs).
+        for i in 0..64 {
+            let d = data.distance_mm[i * NB_TARGET_PER_ZONE];
             defmt::assert!(d < 8000, "zone {} distance {} mm implausible (bad read?)", i, d);
         }
         sensor.stop_ranging().await.unwrap();
