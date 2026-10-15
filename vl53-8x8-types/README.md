@@ -63,6 +63,12 @@ belong to the matching ULD plugin, and the driver crates forward them.
 
 ## License
 
-BSD-3-Clause; see [`LICENSE`](LICENSE). The constants and struct layouts
-mirror STMicroelectronics' VL53L8CX Ultra Lite Driver headers, which ST
-publishes under the same BSD-3-Clause terms.
+BSD-3-Clause; see [`LICENSE`](LICENSE).
+
+The constants and struct layouts mirror the headers of the official
+**STMicroelectronics VL53L8CX Ultra Lite Driver**, which ST distributes under
+the BSD 3-Clause License ([STSW-IMG040](https://www.st.com/en/embedded-software/stsw-img040.html)).
+
+The hand-written Rust types originate from Scott Wakefield's earlier
+`vl53l5cx-driver` work and are included here under BSD 3-Clause with the
+original author's permission.

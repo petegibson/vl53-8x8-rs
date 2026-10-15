@@ -131,7 +131,15 @@ Verified with this crate layout, via the demo crates' on-target test suites:
 
 ## License
 
-BSD-3-Clause; see [`LICENSE`](LICENSE). The firmware image and the data
-tables in `src/uld_data.rs` are STMicroelectronics' VL53L8CX Ultra Lite
-Driver data, redistributed under ST's BSD-3-Clause terms in
-[`LICENSE-ST`](LICENSE-ST).
+BSD-3-Clause; see [`LICENSE`](LICENSE).
+
+The firmware image and the data tables in `src/uld_data.rs` are taken from the
+official **STMicroelectronics VL53L8CX Ultra Lite Driver**, and the driver
+logic is a Rust port of that C code. ST distributes the ULD under the BSD
+3-Clause License (see [`LICENSE-ST`](LICENSE-ST) and `LICENSE.txt` in ST's
+[STSW-IMG040](https://www.st.com/en/embedded-software/stsw-img040.html)
+package).
+
+The shared types this crate re-exports from `vl53-8x8-types` originate from
+Scott Wakefield's earlier `vl53l5cx-driver` work and are included under BSD
+3-Clause with the original author's permission.

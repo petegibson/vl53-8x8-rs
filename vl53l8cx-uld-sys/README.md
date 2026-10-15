@@ -87,8 +87,16 @@ on-target tests).
 
 ## License
 
-The Rust parts are BSD-3-Clause; see [`LICENSE`](LICENSE). The C sources and
-data under `src/VL53L8CX_ULD_API/` are STMicroelectronics' VL53L8CX Ultra
-Lite Driver (STSW-IMG040, ULD 2.0.0), redistributed under ST's BSD-3-Clause
-terms in [`LICENSE-ST`](LICENSE-ST). They are included verbatim apart from
-line-ending normalisation and one missing-semicolon fix in `vl53l8cx_api.c`.
+BSD-3-Clause; see [`LICENSE`](LICENSE).
+
+The C sources and data under `src/VL53L8CX_ULD_API/` are the official
+**STMicroelectronics VL53L8CX Ultra Lite Driver** (STSW-IMG040, ULD 2.0.0),
+distributed by ST under the BSD 3-Clause License (see
+[`LICENSE-ST`](LICENSE-ST), the per-file copyright headers, and `LICENSE.txt`
+in ST's [STSW-IMG040](https://www.st.com/en/embedded-software/stsw-img040.html)
+package). They are included verbatim apart from line-ending normalisation and
+one missing-semicolon fix in `vl53l8cx_api.c`.
+
+The Rust build script and safe wrappers originate from Scott Wakefield's
+earlier `vl53l5cx-sys` work and are included here under BSD 3-Clause with the
+original author's permission.

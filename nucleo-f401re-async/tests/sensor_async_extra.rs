@@ -520,8 +520,13 @@ mod tests {
     /// 44 or more as motion. If the `xtalk` feature is also on, xtalk is
     /// calibrated first so a cover glass does not swamp the measurement.
     /// Informational: asserts only that frames keep parsing.
+    ///
+    /// **Needs a person to move something in front of the sensor**, so it is
+    /// `#[ignore]`d and skipped by default. Run it explicitly with
+    /// `cargo test --features spi-bus,motion -- --include-ignored test_motion_indicator_report`.
     #[cfg(feature = "motion")]
     #[test]
+    #[ignore]
     #[timeout(60)]
     async fn test_motion_indicator_report(mut sensor: SensorRef) {
         const MOTION_THRESHOLD: u32 = 44;
@@ -590,6 +595,9 @@ mod tests {
             frames_with_motion, FRAMES, MOTION_THRESHOLD, max_motion
         );
         defmt::info!("hits per zone (4x4, row-major): {}", hits_per_zone);
+        if frames_with_motion == 0 {
+            defmt::warn!("no motion observed: nothing moved in the field of view during the capture?");
+        }
     }
 
     #[cfg(feature = "xtalk")]

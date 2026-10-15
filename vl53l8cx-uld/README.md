@@ -99,7 +99,15 @@ Verified with this crate layout:
 
 ## License
 
-BSD-3-Clause; see [`LICENSE`](LICENSE). The ULD C code and firmware this
-crate links are STMicroelectronics' VL53L8CX Ultra Lite Driver, redistributed
-by `vl53l8cx-uld-sys` under ST's BSD-3-Clause terms (`LICENSE-ST` in that
-crate).
+BSD-3-Clause; see [`LICENSE`](LICENSE).
+
+The ULD C code and firmware this crate links are the official
+**STMicroelectronics VL53L8CX Ultra Lite Driver**, distributed by ST under the
+BSD 3-Clause License (see `LICENSE-ST` in `vl53l8cx-uld-sys`, the per-file
+copyright headers, and `LICENSE.txt` in ST's
+[STSW-IMG040](https://www.st.com/en/embedded-software/stsw-img040.html)
+package).
+
+The Rust wrapper originates from Scott Wakefield's earlier `vl53l5cx-driver`
+work and is included here under BSD 3-Clause with the original author's
+permission.
