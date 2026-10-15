@@ -381,48 +381,12 @@ evo_tests! {
     target_order [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"],
     ranging_mode [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"],
     sharpener_percent [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"],
-    power_mode_sleep_wakeup [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"]
-        [ignore_coalesced = "KNOWN_DIVERGENCES.md #3: vl53-8x8 reads 0x000F on wake-up, ST's L5 ULD does not"],
-    calibrate_xtalk_leaves_sensor_usable [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"]
-        [ignore_coalesced = "KNOWN_DIVERGENCES.md #4: calibrate_xtalk reads the resolution last, ST's ULD first"],
+    power_mode_sleep_wakeup [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"],
+    calibrate_xtalk_leaves_sensor_usable [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"],
     calibrate_xtalk_rejects_invalid_params [ignore = "KNOWN_DIVERGENCES.md #2: vl53-8x8 writes the firmware bank holding the L5 patch in 3 writes, ST's ULD in 1"]
         [ignore_coalesced = "KNOWN_DIVERGENCES.md #5: ST's ULD reads the configuration before rejecting invalid xtalk parameters"],
 }
 
-// --- xtalk calibration: beyond the read order ---------------------------------------------
-
-/// The L5 recording's `calibrate_xtalk_leaves_sensor_usable` sequence with the
-/// resolution read of `calibrate_xtalk` (DCI 0x5450, the 20-byte read at
-/// `0x2c04`) moved from after the ranging-mode read to before the frequency
-/// read, where ST's `vl53l5cx_calibrate_xtalk` issues it. Nothing else moves.
-fn xtalk_sequence_in_st_read_order() -> Vec<Op> {
-    let ops = Recording::rust_l5().sequence("calibrate_xtalk_leaves_sensor_usable").unwrap().ops.clone();
-    let is_dci_req = |o: &Op, dci: [u8; 2]| o.dir == Dir::W && o.reg == 0x2FF4 && o.data.len() == 12 && o.data[..2] == dci;
-    let cmd = ops.iter().position(|o| o.dir == Dir::W && o.reg == 0x2C28 && o.data.len() == 984).expect("xtalk command");
-    // The frequency getter is the first configuration read of `calibrate_xtalk`;
-    // the resolution read that follows the six getters is the one to move (the
-    // later `0x5450` read before the command is `set_resolution(8x8)`'s own).
-    let freq = (0..cmd).rev().find(|&i| is_dci_req(&ops[i], [0x54, 0x58])).expect("frequency read request");
-    let res = (freq..cmd).find(|&i| is_dci_req(&ops[i], [0x54, 0x50])).expect("resolution read request");
-    assert_eq!((ops[res + 1].dir, ops[res + 1].reg), (Dir::R, 0x2C00));
-    assert_eq!((ops[res + 2].dir, ops[res + 2].reg, ops[res + 2].data.len()), (Dir::R, 0x2C04, 20));
-    let mut out = ops.clone();
-    let triple: Vec<Op> = out.drain(res..res + 3).collect();
-    out.splice(freq..freq, triple);
-    assert_eq!(out.len(), ops.len());
-    out
-}
-
-/// Diagnostic for KNOWN_DIVERGENCES.md #4: with the recording's configuration
-/// reads put in ST's order (and writes coalesced, #2), does the rest of the
-/// xtalk calibration path match ST's L5 code?
-#[test]
-fn calibrate_xtalk_matches_st_apart_from_the_configuration_read_order() {
-    let test = "calibrate_xtalk_leaves_sensor_usable";
-    let expected = xtalk_sequence_in_st_read_order();
-    let replayed = replay_with(Which::C, test, &expected);
-    check_against(Which::C, test, Mode::Coalesced, "recording evo-l5-i2c-8x8.log (resolution read moved first)", &expected, replayed);
-}
 
 // --- patch-table cross-checks -----------------------------------------------------------
 

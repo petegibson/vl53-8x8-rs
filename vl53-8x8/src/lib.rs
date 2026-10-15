@@ -586,15 +586,22 @@ where
             PowerMode::Wakeup => {
                 self.bus.write_byte(self.address, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
                 self.bus.write_byte(self.address, 0x09, 0x04).await.map_err(Error::Bus)?;
-                let stored = self.bus.read_byte(self.address, 0x000F).await.map_err(Error::Bus)?;
-                if stored == 0x43 {
-                    self.bus.write_byte(self.address, 0x000F, 0x40).await.map_err(Error::Bus)?;
+                // Deep-sleep marker check: VL53L8CX ULD only. The VL53L5CX
+                // ULD has no deep sleep and goes straight to the boot poll
+                // (differential test vs ST's L5 code, KNOWN_DIVERGENCES #3).
+                let mut was_deep_sleep = false;
+                if self.variant.info().has_deep_sleep {
+                    let stored = self.bus.read_byte(self.address, 0x000F).await.map_err(Error::Bus)?;
+                    was_deep_sleep = stored == 0x43;
+                    if was_deep_sleep {
+                        self.bus.write_byte(self.address, 0x000F, 0x40).await.map_err(Error::Bus)?;
+                    }
                 }
                 ops::poll_for_answer(
                     &mut self.bus, self.address, &mut self.delay,
                     &mut self.stdev.temp_buffer, 1, 0, 0x06, 0x01, 1,
                 ).await?;
-                if stored == 0x43 {
+                if was_deep_sleep {
                     // Re-init after deep sleep, using the detected variant.
                     let mut fw = self.variant.firmware();
                     let info = self.variant.info();
@@ -1120,7 +1127,8 @@ where
             return Err(Error::Firmware(FirmwareError::InvalidParam));
         }
 
-        // Get initial configuration (resolution is handled inside the op).
+        // Get initial configuration, in the ULD's order (resolution first).
+        let resolution = self.get_resolution().await? as u8;
         let frequency = self.get_ranging_frequency_hz().await?;
         let integration_time_ms = self.get_integration_time_ms().await?;
         let sharpener = self.get_sharpener_percent().await?;
@@ -1130,7 +1138,7 @@ where
 
         let outcome = ops::calibrate_xtalk(
             &mut self.bus, self.address, &mut self.delay, &mut self.stdev,
-            self.variant.info(), reflectance_percent, nb_samples, distance_mm,
+            self.variant.info(), resolution, reflectance_percent, nb_samples, distance_mm,
         ).await;
 
         // Reset initial configuration, in the ULD's order and whatever the

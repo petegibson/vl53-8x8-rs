@@ -1537,7 +1537,7 @@ async fn program_xtalk_output_config<BUS: VlBusAsync, D: DelayNs>(
 /// margin and ranging mode through its public getters/setters. Those are
 /// `Sensor` methods here, so `Sensor::calibrate_xtalk` does that bracket
 /// around this function, in the ULD's order (resolution is restored first,
-/// inside this function, then the six scalars).
+/// by the caller first, then the six scalars; both are restored afterwards).
 ///
 /// Two deliberate divergences from the C's `status |=` accumulation:
 /// arguments are validated before any bus traffic (the ULD reads the
@@ -1555,6 +1555,7 @@ pub async fn calibrate_xtalk<BUS: VlBusAsync, D: DelayNs>(
     delay: &mut D,
     stdev: &mut State,
     info: &SensorInfo,
+    resolution: u8,
     reflectance_percent: u8,
     nb_samples: u8,
     distance_mm: u16,
@@ -1563,8 +1564,9 @@ pub async fn calibrate_xtalk<BUS: VlBusAsync, D: DelayNs>(
         return Err(Error::Firmware(FirmwareError::InvalidParam));
     }
 
-    // Get initial configuration (the resolution part; see the doc comment).
-    let resolution = get_resolution(bus, addr, delay, &mut stdev.temp_buffer).await?;
+    // `resolution` is the caller's saved value: the ULD reads it FIRST, before
+    // the other settings, and the differential test against ST's code checks
+    // that order (KNOWN_DIVERGENCES #4). It is restored at the end.
     set_resolution(bus, addr, delay, stdev, VL53L8CX_RESOLUTION_8X8).await?;
 
     // Send Xtalk calibration buffer: the shared (L8) table with the variant
@@ -1770,7 +1772,8 @@ mod tests {
         for (r, n, d) in [(0u8, 4u8, 600u16), (100, 4, 600), (5, 0, 600), (5, 17, 600), (5, 4, 599), (5, 4, 3001)] {
             let mut stdev = State::new();
             let result = block_on(calibrate_xtalk(
-                &mut PanicBus, 0x29, &mut NoDelay, &mut stdev, Variant::L8.info(), r, n, d,
+                &mut PanicBus, 0x29, &mut NoDelay, &mut stdev, Variant::L8.info(),
+                VL53L8CX_RESOLUTION_4X4, r, n, d,
             ));
             assert!(
                 matches!(result, Err(Error::Firmware(FirmwareError::InvalidParam))),

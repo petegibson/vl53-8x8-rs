@@ -99,9 +99,12 @@ sensor's address auto-increment makes the result the same. The `d2` checks,
 which merge register-contiguous writes on both sides before comparing, pass
 for 10 of the 13 sequences; the other three are entries 3-5.
 
-## 3. `power_mode_sleep_wakeup`: `vl53-8x8` reads `0x000F` on wake-up, ST's L5 ULD does not
+## 3. `power_mode_sleep_wakeup`: `vl53-8x8` read `0x000F` on wake-up, ST's L5 ULD does not — FIXED
 
-**Status: open.** Check ignored: `d2` of `power_mode_sleep_wakeup`.
+**Status: fixed.** The `0x000F` deep-sleep marker read is the VL53L8CX ULD's
+behaviour; `vl53-8x8` now gates it on `SensorInfo::has_deep_sleep`, so the L5
+path matches ST's L5 code. The L5 recording was re-taken and `d2` is no longer
+ignored. Original report below.
 
 **Bus difference** (op 114 after normalisation and write coalescing, inside
 `set_power_mode(Wakeup)` after `W 0x7fff [00]`, `W 0x0009 [04]`):
@@ -123,9 +126,11 @@ no deep-sleep mode and goes from `W 0x09 [04]` straight to the `0x06` poll.
 **Impact**: one extra one-byte read; harmless. The read could be gated on
 `SensorInfo::has_deep_sleep`.
 
-## 4. `calibrate_xtalk_leaves_sensor_usable`: `calibrate_xtalk` reads the resolution last, ST's ULD reads it first
+## 4. `calibrate_xtalk_leaves_sensor_usable`: `calibrate_xtalk` read the resolution last, ST's ULD reads it first — FIXED
 
-**Status: open.** Check ignored: `d2` of `calibrate_xtalk_leaves_sensor_usable`.
+**Status: fixed.** `Sensor::calibrate_xtalk` now reads the resolution first and
+passes it into `ops::calibrate_xtalk`, in the ULD's order. Both Rust recordings
+were re-taken and `d2` is no longer ignored. Original report below.
 
 **Bus difference** (op 115 after normalisation and write coalescing, the first
 op of `calibrate_xtalk(5, 4, 600)`; each configuration read is a DCI read:
@@ -151,14 +156,13 @@ Because the resolution and the ranging mode are both 20-byte reads at
 `(0x2c04, 20)`, the register model hands ST's code the two answers swapped,
 and ST's code ends with `InvalidParam` when it "restores" resolution 3 at the
 end. That is an artefact of the model's `(register, length)` keying, not a
-fault of ST's code. The diagnostic
-`calibrate_xtalk_matches_st_apart_from_the_configuration_read_order` (not
-ignored, passes) replays ST's code against the recording with the resolution
-read moved to ST's position: the remaining ~290 ops, i.e. the L5-patched
-984-byte command table at `0x2c28`, the calibration configuration, the output
-configuration, the start command, the completion poll, the xtalk data fetch,
-the default configuration reset and the restore of the resolution and the six
-settings, are identical.
+fault of ST's code. A diagnostic that replayed ST's code against the recording
+with the resolution read moved to ST's position showed the remaining ~290 ops,
+i.e. the L5-patched 984-byte command table at `0x2c28`, the calibration
+configuration, the output configuration, the start command, the completion
+poll, the xtalk data fetch, the default configuration reset and the restore of
+the resolution and the six settings, to be identical. Once the driver adopted
+ST's order the regular `d2` check covers this and the diagnostic was removed.
 
 **Impact**: order of seven reads only.
 
