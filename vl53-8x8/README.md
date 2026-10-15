@@ -61,7 +61,7 @@ loop {
   wrapper (useful where the HAL's async I2C is unreliable).
 - `with_address` + `redetect` re-attach a handle to a sensor already moved
   with `set_i2c_address`, without re-uploading firmware; see the
-  `evo-f412re-async` demo for two sensors on one bus.
+  `examples/evo-f412re-embassy` demo for two sensors on one bus.
 
 ## Features
 
@@ -99,7 +99,7 @@ VL53L8CX, SPI): the full on-target suites pass, and with a two-surface scene
 (a clear lid ~20 mm above the sensor and a surface beyond it) the firmware
 reports second targets with ST status 13 and first targets with status 12,
 as documented for overlapping returns. See `multi_target_scene_report` in
-`evo-f412re-async/tests/sensor_async.rs`.
+`examples/evo-f412re-embassy/tests/sensor_async.rs`.
 
 ## ST data tables and regeneration
 
@@ -121,12 +121,12 @@ Verified with this crate layout, via the demo crates' on-target test suites:
 
 * STM32F401RE Nucleo + X-NUCLEO-53L8A1 shield (VL53L8CX) over SPI and over
   I2C, both true async DMA I2C and the `BlockingI2c` adapter
-  (`nucleo-f401re-async`, embassy-stm32 0.6 / embassy-executor 0.10).
+  (`examples/nucleo-f401re-embassy`, embassy-stm32 0.6 / embassy-executor 0.10).
 * STM32F412RE custom board over async DMA I2C, with both a VL53L8CX and a
   VL53L5CX fitted in turn: autodetect, the patched-firmware upload path and
-  the full test suite pass on each (`evo-f412re-async`).
+  the full test suite pass on each (`examples/evo-f412re-embassy`).
 * Raspberry Pi Zero 2W (Linux, `linux-embedded-hal`) with a Pololu VL53L8CX
-  breakout over `/dev/spidev0.0`, Tokio current-thread (`rpi-zero-2w`).
+  breakout over `/dev/spidev0.0`, Tokio current-thread (`examples/rpi-zero-2w`).
 
 
 ## License

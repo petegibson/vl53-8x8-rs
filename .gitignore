@@ -37,19 +37,13 @@
 
 # End of https://www.toptal.com/developers/gitignore/api/rust
 
-vl53l5cx-driver/target
-vl53l5cx-sys/target
-nucleo-f401re/target
-nucleo-f401re-async/target
-/nucleo-f401re/blocking_log.txt
-/nucleo-f401re-async/async_log.txt
-/nucleo-f401re-async/async_spi_log.txt
+# Board demo crates under examples/ are standalone cargo roots with their own target/.
+/examples/*/target
+/examples/*/*_log.txt
 /.direnv
 /.envrc
-/rpi-zero-2w/target
-/evo-f412re-async/target
 
 # On-target defmt capture logs
-/evo-f412re-async/logs/
+/examples/*/logs/
 # Stray cookie jar (not part of the project)
 /cookies

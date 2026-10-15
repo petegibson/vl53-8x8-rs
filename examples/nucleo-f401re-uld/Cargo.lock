@@ -528,7 +528,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nucleo-f401re"
+name = "nucleo-f401re-uld"
 version = "0.1.0"
 dependencies = [
  "cortex-m",

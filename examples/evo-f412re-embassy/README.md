@@ -1,4 +1,4 @@
-# evo-f412re-async
+# evo-f412re-embassy
 
 Async VL53L5CX / VL53L8CX ranging demo for a custom **STM32F412RE** board.
 

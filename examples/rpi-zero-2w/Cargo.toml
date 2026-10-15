@@ -7,8 +7,8 @@ description = "Raspberry Pi Zero 2W VL53L8CX example driving a Pololu breakout v
 publish = false
 
 [dependencies]
-vl53l8cx-uld = { path = "../vl53l8cx-uld" }
-vl53-8x8 = { path = "../vl53-8x8" }
+vl53l8cx-uld = { path = "../../vl53l8cx-uld" }
+vl53-8x8 = { path = "../../vl53-8x8" }
 linux-embedded-hal = "0.4"
 embedded-hal = "1.0"
 embedded-hal-async = "1.0"

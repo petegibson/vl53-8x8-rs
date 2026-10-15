@@ -82,7 +82,7 @@ indexed `zone * N + target`.
 ## Hardware verification
 
 Verified with this crate layout through `vl53l8cx-uld` on an STM32F401RE
-Nucleo with the X-NUCLEO-53L8A1 shield over SPI (`nucleo-f401re` demo and
+Nucleo with the X-NUCLEO-53L8A1 shield over SPI (`examples/nucleo-f401re-uld` demo and
 on-target tests).
 
 ## License

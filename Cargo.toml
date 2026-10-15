@@ -6,10 +6,12 @@ members = [
     "vl53l8cx-uld",
     "vl53-8x8",
 ]
+# Board demo crates: standalone roots with their own target/HAL/linker
+# config, not published.
 exclude = [
-    "nucleo-f401re",
-    "nucleo-f401re-async",
-    "rpi-zero-2w",
-    "evo-f412re-async",
+    "examples/nucleo-f401re-uld",
+    "examples/nucleo-f401re-embassy",
+    "examples/evo-f412re-embassy",
+    "examples/rpi-zero-2w",
 ]
 resolver = "2"

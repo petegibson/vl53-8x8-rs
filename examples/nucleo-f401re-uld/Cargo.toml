@@ -1,5 +1,5 @@
 [package]
-name = "nucleo-f401re"
+name = "nucleo-f401re-uld"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -11,7 +11,7 @@ defmt = "0.3"
 defmt-rtt = "0.4"
 stm32f4xx-hal = { version = "0.22", features = ["stm32f401"] }
 embedded-hal = "1.0"
-vl53l8cx-uld = { path = "../vl53l8cx-uld" }
+vl53l8cx-uld = { path = "../../vl53l8cx-uld" }
 embedded-hal-bus = { version = "0.2", optional = true }
 panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
 

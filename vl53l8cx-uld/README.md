@@ -93,9 +93,9 @@ crossed (autonomous mode), instead of after the measurement completes; call
 Verified with this crate layout:
 
 * STM32F401RE Nucleo with the X-NUCLEO-53L8A1 shield over SPI, via the
-  `nucleo-f401re` demo and its on-target tests.
+  `examples/nucleo-f401re-uld` demo and its on-target tests.
 * Raspberry Pi Zero 2W (Linux, `linux-embedded-hal`) with a Pololu VL53L8CX
-  breakout over `/dev/spidev0.0` (`rpi-zero-2w`, blocking demo).
+  breakout over `/dev/spidev0.0` (`examples/rpi-zero-2w`, blocking demo).
 
 ## License
 

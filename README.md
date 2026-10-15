@@ -24,13 +24,16 @@ Two drivers share one set of types:
 | [`vl53l8cx-uld-sys`](./vl53l8cx-uld-sys) | bindgen + `cc` over ST's VL53L8CX ULD C sources and firmware.          |
 | [`vl53l8cx-uld`](./vl53l8cx-uld)     | Safe blocking `embedded-hal` wrapper over `vl53l8cx-uld-sys`.           |
 | [`vl53l5cx-uld-sys`](./vl53l5cx-uld-sys) | ST's VL53L5CX ULD, compiled the same way. **Unpublished** test oracle: lets `vl53-8x8` check its L5 firmware/config patches against ST's L5 arrays byte for byte. |
-| [`nucleo-f401re/`](./nucleo-f401re)  | Demo: blocking (`vl53l8cx-uld`) on STM32F401RE Nucleo + X-NUCLEO-53L8A1, I²C or SPI (`spi-bus`). |
-| [`nucleo-f401re-async/`](./nucleo-f401re-async) | Demo: async (`vl53-8x8`, Embassy) on the same board.           |
-| [`evo-f412re-async/`](./evo-f412re-async) | Demo: async (`vl53-8x8`) on a custom STM32F412RE board, DMA I²C, L5 or L8, two sensors on one bus. |
-| [`rpi-zero-2w/`](./rpi-zero-2w)      | Demo: Linux on Raspberry Pi Zero 2W, both drivers, SPI via `linux-embedded-hal`. |
+| [`examples/nucleo-f401re-uld/`](./examples/nucleo-f401re-uld) | Demo: blocking (`vl53l8cx-uld`) on STM32F401RE Nucleo + X-NUCLEO-53L8A1, I²C or SPI (`spi-bus`). |
+| [`examples/nucleo-f401re-embassy/`](./examples/nucleo-f401re-embassy) | Demo: async (`vl53-8x8`, Embassy) on the same board.           |
+| [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy) | Demo: async (`vl53-8x8`, Embassy) on a custom STM32F412RE board, DMA I²C, L5 or L8, two sensors on one bus. |
+| [`examples/rpi-zero-2w/`](./examples/rpi-zero-2w) | Demo: Linux on Raspberry Pi Zero 2W, both drivers, SPI via `linux-embedded-hal`. |
 
-The demo crates are `publish = false` and are standalone workspace roots, so
-each is built from its own directory.
+`examples/` holds standalone board crates: each is its own cargo root with its
+own target, HAL and linker configuration, is excluded from the workspace, and
+is `publish = false`, so each is built (and its on-target tests run) from its
+own directory. The `justfile` at the repository root collects the host and
+hardware test matrix (`just --list`).
 
 ## Verified platforms
 
@@ -40,14 +43,15 @@ this repository:
 * **Bare-metal Cortex-M4** — STM32F401RE Nucleo board with the
   X-NUCLEO-53L8A1 expansion shield, both I²C and SPI, both blocking
   (`stm32f4xx-hal`) and async (`embassy-stm32`) execution. See
-  [`nucleo-f401re/`](./nucleo-f401re) and [`nucleo-f401re-async/`](./nucleo-f401re-async).
+  [`examples/nucleo-f401re-uld/`](./examples/nucleo-f401re-uld) and
+  [`examples/nucleo-f401re-embassy/`](./examples/nucleo-f401re-embassy).
 * **Bare-metal Cortex-M4, async DMA I²C** — custom STM32F412RE board with a
   VL53L8CX, pure-Rust `vl53-8x8` driver including the firmware upload path.
-  See [`evo-f412re-async/`](./evo-f412re-async).
+  See [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy).
 * **Linux on Raspberry Pi Zero 2W** — Pololu VL53L8CX breakout over
   `/dev/spidev0.0` and `/dev/gpiochip0` via `linux-embedded-hal`, both
   blocking and async (Tokio current-thread). See
-  [`rpi-zero-2w/`](./rpi-zero-2w).
+  [`examples/rpi-zero-2w/`](./examples/rpi-zero-2w).
 
 Other `embedded-hal` 1.0 implementations should work — both driver crates
 are written against generic `I2c` / `SpiDevice` / `OutputPin` / `DelayNs`
@@ -183,9 +187,10 @@ and `probe-rs-tools` / `cargo-binutils` for flashing the STM32 boards.
 nix develop                            # drop into the dev shell
 cargo build --workspace                # build the four library crates
 cargo test --workspace                 # host tests incl. vl53-8x8's C-oracle tests
-cd nucleo-f401re && cargo run          # flash + run on a connected Nucleo (probe-rs)
-cd nucleo-f401re-async && cargo test --release --features spi-bus   # on-target tests
-cd rpi-zero-2w && cargo build --target aarch64-unknown-linux-musl --bins
+just --list                            # host + hardware test matrix (see justfile)
+cd examples/nucleo-f401re-uld && cargo run            # flash + run on a connected Nucleo (probe-rs)
+cd examples/nucleo-f401re-embassy && cargo test --release --features spi-bus   # on-target tests
+cd examples/rpi-zero-2w && cargo build --target aarch64-unknown-linux-musl --bins
 ```
 
 Each demo crate's README covers its own setup (board jumpers, kernel

@@ -1,5 +1,5 @@
 [package]
-name = "evo-f412re-async"
+name = "evo-f412re-embassy"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -18,7 +18,7 @@ embassy-sync = "0.8.0"
 embassy-time = { version = "0.5.1", features = ["defmt", "tick-hz-32_768"] }
 embedded-hal = "1.0"
 panic-probe = { version = "1.0", features = ["print-defmt"] }
-vl53-8x8 = { path = "../vl53-8x8" }
+vl53-8x8 = { path = "../../vl53-8x8" }
 
 [features]
 default = []
@@ -33,7 +33,7 @@ targets-3 = ["vl53-8x8/targets-3"]
 targets-4 = ["vl53-8x8/targets-4"]
 
 [[bin]]
-name = "evo-f412re-async"
+name = "evo-f412re-embassy"
 test = false
 
 [dev-dependencies]

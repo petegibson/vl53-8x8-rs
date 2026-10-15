@@ -37,6 +37,7 @@
             pkgs.llvmPackages.libclang
             pkgs.cargo-binutils
             pkgs.probe-rs-tools
+            pkgs.just
             # Pi cross-compilers (provide aarch64-unknown-linux-gnu-gcc /
             # armv7l-unknown-linux-gnueabihf-gcc plus their binutils & sysroots).
             crossAarch64.stdenv.cc

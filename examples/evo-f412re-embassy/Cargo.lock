@@ -619,7 +619,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "evo-f412re-async"
+name = "evo-f412re-embassy"
 version = "0.1.0"
 dependencies = [
  "cortex-m",

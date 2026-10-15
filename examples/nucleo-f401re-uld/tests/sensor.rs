@@ -33,13 +33,13 @@ mod tests {
     use super::*;
 
     #[init]
-    fn init() -> nucleo_f401re::Sensor {
-        nucleo_f401re::board_init()
+    fn init() -> nucleo_f401re_uld::Sensor {
+        nucleo_f401re_uld::board_init()
     }
 
     #[test]
     #[timeout(5)]
-    fn test_sensor_alive(mut sensor: nucleo_f401re::Sensor) {
+    fn test_sensor_alive(mut sensor: nucleo_f401re_uld::Sensor) {
         #[cfg(not(feature = "spi-bus"))]
         defmt::assert!(
             sensor.is_alive().unwrap(),
@@ -54,13 +54,13 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_init(mut sensor: nucleo_f401re::Sensor) {
+    fn test_init(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
     }
 
     #[test]
     #[timeout(10)]
-    fn test_set_resolution(mut sensor: nucleo_f401re::Sensor) {
+    fn test_set_resolution(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_resolution(Resolution::Res4x4).unwrap();
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_ranging_4x4(mut sensor: nucleo_f401re::Sensor) {
+    fn test_ranging_4x4(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res4x4).unwrap();
         sensor.set_ranging_frequency_hz(5).unwrap();
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_ranging_8x8(mut sensor: nucleo_f401re::Sensor) {
+    fn test_ranging_8x8(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res8x8).unwrap();
         sensor.set_ranging_frequency_hz(5).unwrap();
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_ambient_light(mut sensor: nucleo_f401re::Sensor) {
+    fn test_ambient_light(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res4x4).unwrap();
         sensor.set_ranging_frequency_hz(5).unwrap();
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_ranging_frequency(mut sensor: nucleo_f401re::Sensor) {
+    fn test_ranging_frequency(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_ranging_frequency_hz(5).unwrap();
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_target_order(mut sensor: nucleo_f401re::Sensor) {
+    fn test_target_order(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_target_order(TargetOrder::Closest).unwrap();
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_ranging_mode(mut sensor: nucleo_f401re::Sensor) {
+    fn test_ranging_mode(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_ranging_mode(RangingMode::Continuous).unwrap();
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_integration_time(mut sensor: nucleo_f401re::Sensor) {
+    fn test_integration_time(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_integration_time_ms(20).unwrap();
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_sharpener_percent(mut sensor: nucleo_f401re::Sensor) {
+    fn test_sharpener_percent(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         // The sensor quantises via u8: set=(pct*255)/100, get=(raw*100)/255,
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_power_mode(mut sensor: nucleo_f401re::Sensor) {
+    fn test_power_mode(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         assert_eq!(sensor.get_power_mode().unwrap(), PowerMode::Wakeup);
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_set_resolution_while_ranging(mut sensor: nucleo_f401re::Sensor) {
+    fn test_set_resolution_while_ranging(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res4x4).unwrap();
         sensor.set_ranging_frequency_hz(5).unwrap();
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     #[timeout(15)]
-    fn test_reinit_after_reset(mut sensor: nucleo_f401re::Sensor) {
+    fn test_reinit_after_reset(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res8x8).unwrap();
 
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_vhv_repeat_count(mut sensor: nucleo_f401re::Sensor) {
+    fn test_vhv_repeat_count(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_vhv_repeat_count(5).unwrap();
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_external_sync_pin_enable(mut sensor: nucleo_f401re::Sensor) {
+    fn test_external_sync_pin_enable(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_external_sync_pin_enable(true).unwrap();
@@ -277,7 +277,7 @@ mod tests {
     #[cfg(not(feature = "spi-bus"))]
     #[test]
     #[timeout(15)]
-    fn test_set_address(mut sensor: nucleo_f401re::Sensor) {
+    fn test_set_address(mut sensor: nucleo_f401re_uld::Sensor) {
         let new_address: u8 = 0x35;
         sensor.set_i2c_address(new_address).unwrap();
         cortex_m::asm::delay(84_000 * 100);
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     #[timeout(10)]
-    fn test_wait_for_data_ready_blocking(mut sensor: nucleo_f401re::Sensor) {
+    fn test_wait_for_data_ready_blocking(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res4x4).unwrap();
         sensor.set_ranging_frequency_hz(5).unwrap();
@@ -304,7 +304,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    fn test_detection_thresholds_enable(mut sensor: nucleo_f401re::Sensor) {
+    fn test_detection_thresholds_enable(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_detection_thresholds_enable(true).unwrap();
@@ -317,7 +317,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    fn test_detection_thresholds_auto_stop(mut sensor: nucleo_f401re::Sensor) {
+    fn test_detection_thresholds_auto_stop(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         // Default after init is off.
@@ -333,7 +333,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    fn test_detection_thresholds(mut sensor: nucleo_f401re::Sensor) {
+    fn test_detection_thresholds(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         let mut thresholds: [DetectionThreshold; 64] = unsafe { core::mem::zeroed() };
@@ -358,7 +358,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    fn test_motion_indicator_init(mut sensor: nucleo_f401re::Sensor) {
+    fn test_motion_indicator_init(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res4x4).unwrap();
 
@@ -371,7 +371,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    fn test_motion_indicator_set_distance(mut sensor: nucleo_f401re::Sensor) {
+    fn test_motion_indicator_set_distance(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res4x4).unwrap();
 
@@ -387,7 +387,7 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
-    fn test_motion_indicator_set_resolution(mut sensor: nucleo_f401re::Sensor) {
+    fn test_motion_indicator_set_resolution(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         let mut motion_config: MotionConfiguration = unsafe { core::mem::zeroed() };
@@ -402,7 +402,7 @@ mod tests {
     #[cfg(feature = "xtalk")]
     #[test]
     #[timeout(10)]
-    fn test_xtalk_margin(mut sensor: nucleo_f401re::Sensor) {
+    fn test_xtalk_margin(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         sensor.set_xtalk_margin(100).unwrap();
@@ -415,7 +415,7 @@ mod tests {
     #[cfg(feature = "xtalk")]
     #[test]
     #[timeout(10)]
-    fn test_caldata_xtalk(mut sensor: nucleo_f401re::Sensor) {
+    fn test_caldata_xtalk(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
         let mut buffer = [0u8; vl53l8cx_uld::XTALK_BUFFER_SIZE];

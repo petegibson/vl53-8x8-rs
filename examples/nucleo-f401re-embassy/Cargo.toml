@@ -1,5 +1,5 @@
 [package]
-name = "nucleo-f401re-async"
+name = "nucleo-f401re-embassy"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -15,7 +15,7 @@ embassy-time = "0.5.1"
 embedded-hal = "1.0"
 embedded-hal-bus = { version = "0.3", features = ["async"], optional = true }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
-vl53-8x8 = { path = "../vl53-8x8" }
+vl53-8x8 = { path = "../../vl53-8x8" }
 
 [features]
 default = []
@@ -31,7 +31,7 @@ targets-3 = ["vl53-8x8/targets-3"]
 targets-4 = ["vl53-8x8/targets-4"]
 
 [[bin]]
-name = "nucleo-f401re-async"
+name = "nucleo-f401re-embassy"
 test = false
 
 [dev-dependencies]
