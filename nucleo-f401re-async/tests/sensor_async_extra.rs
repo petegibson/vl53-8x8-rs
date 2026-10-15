@@ -8,10 +8,9 @@ use embassy_time::Delay;
 use vl53_8x8::{Resolution, NB_TARGET_PER_ZONE};
 
 #[cfg(feature = "thresholds")]
-use vl53_8x8::{
-    DetectionThreshold, MotionConfiguration, ThresholdMeasurement, ThresholdOperation,
-    ThresholdType,
-};
+use vl53_8x8::{DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType};
+#[cfg(any(feature = "motion", feature = "thresholds"))]
+use vl53_8x8::MotionConfiguration;
 
 // --- I2C mode (default) ---
 
@@ -515,6 +514,84 @@ mod tests {
     /// valid distance as the calibration target distance, calibrates, then
     /// ranges again so the before/after frames and the result can be compared
     /// in the log. Informational: only the sensor staying usable is asserted.
+    /// Motion indicator report: configures the motion plugin for 4x4 over
+    /// 400..1900 mm, then logs the per-zone motion values for ~12 s while
+    /// something moves in the field of view. ST's example treats a value of
+    /// 44 or more as motion. If the `xtalk` feature is also on, xtalk is
+    /// calibrated first so a cover glass does not swamp the measurement.
+    /// Informational: asserts only that frames keep parsing.
+    #[cfg(feature = "motion")]
+    #[test]
+    #[timeout(60)]
+    async fn test_motion_indicator_report(mut sensor: SensorRef) {
+        const MOTION_THRESHOLD: u32 = 44;
+        const FREQ_HZ: u8 = 15;
+        const FRAMES: usize = 180; // ~12 s at 15 Hz
+
+        sensor.init().await.unwrap();
+        sensor.set_resolution(Resolution::Res4x4).await.unwrap();
+
+        #[cfg(feature = "xtalk")]
+        match sensor.calibrate_xtalk(50, 8, 1640).await {
+            Ok(()) => defmt::info!("xtalk calibrated before motion test"),
+            Err(e) => defmt::warn!("xtalk calibration skipped: {}", defmt::Debug2Format(&e)),
+        }
+
+        let mut motion_config: MotionConfiguration = unsafe { core::mem::zeroed() };
+        sensor
+            .motion_indicator_init(&mut motion_config, Resolution::Res4x4)
+            .await
+            .unwrap();
+        sensor
+            .motion_indicator_set_distance_motion(&mut motion_config, 400, 1900)
+            .await
+            .unwrap();
+        sensor.set_ranging_frequency_hz(FREQ_HZ).await.unwrap();
+        sensor.start_ranging().await.unwrap();
+
+        // Discard the first frame (status 6, wrap-around not performed).
+        sensor.poll_data_ready().await.unwrap();
+        let _ = sensor.get_ranging_data().await.unwrap();
+
+        let mut frames_with_motion = 0u32;
+        let mut hits_per_zone = [0u32; 16];
+        let mut max_motion = 0u32;
+        defmt::info!("capturing {} frames at {} Hz: move something 30-80 cm above the sensor", FRAMES, FREQ_HZ);
+        for frame in 0..FRAMES {
+            sensor.poll_data_ready().await.unwrap();
+            let data = sensor.get_ranging_data().await.unwrap();
+            let m = &data.motion_indicator;
+            let mut moving = 0u32;
+            let mut frame_max = 0u32;
+            for zone in 0..16 {
+                let v = m.motion[zone];
+                frame_max = frame_max.max(v);
+                if v >= MOTION_THRESHOLD {
+                    moving += 1;
+                    hits_per_zone[zone] += 1;
+                }
+            }
+            max_motion = max_motion.max(frame_max);
+            if moving > 0 {
+                frames_with_motion += 1;
+                defmt::info!(
+                    "frame {}: motion in {} zones, max {} (global {} / {}, aggregates {})",
+                    frame, moving, frame_max, m.global_indicator_1, m.global_indicator_2,
+                    m.nb_of_detected_aggregates
+                );
+            } else if frame % 30 == 0 {
+                defmt::info!("frame {}: still (max {})", frame, frame_max);
+            }
+        }
+        sensor.stop_ranging().await.unwrap();
+
+        defmt::info!(
+            "{} of {} frames had motion (>= {}); max motion value {}",
+            frames_with_motion, FRAMES, MOTION_THRESHOLD, max_motion
+        );
+        defmt::info!("hits per zone (4x4, row-major): {}", hits_per_zone);
+    }
+
     #[cfg(feature = "xtalk")]
     #[test]
     #[timeout(60)]
