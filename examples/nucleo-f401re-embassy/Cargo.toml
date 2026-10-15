@@ -43,11 +43,6 @@ name = "sensor_async"
 path = "tests/sensor_async.rs"
 harness = false
 
-[[test]]
-name = "sensor_async_extra"
-path = "tests/sensor_async_extra.rs"
-harness = false
-
 [profile.dev]
 opt-level = "s"
 

@@ -48,11 +48,10 @@ publish-dry-run:
 test-nucleo-uld features="spi-bus":
     cd {{nucleo_uld}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor --features "{{features}}"
 
-# Test: vl53-8x8 Embassy suites (sensor_async + sensor_async_extra)
+# Test: vl53-8x8 Embassy suite (features e.g. `spi-bus,thresholds`)
 [group('nucleo-f401re')]
 test-nucleo-embassy features="spi-bus":
     cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async --features "{{features}}"
-    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features "{{features}}"
 
 # `probe-rs run` streams defmt until killed, so `timeout` ends the run after
 # 25 s and `|| true` keeps that from failing the recipe. Expect init, the
@@ -74,12 +73,12 @@ report-nucleo-scene features="spi-bus,targets-2":
 # Report: motion indicator (wave something in view while it runs)
 [group('nucleo-f401re')]
 report-nucleo-motion:
-    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features spi-bus,motion,xtalk -- --include-ignored test_motion_indicator_report
+    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async --features spi-bus,motion,xtalk -- --include-ignored test_motion_indicator_report
 
 # Report: xtalk calibration, frames before and after
 [group('nucleo-f401re')]
 report-nucleo-xtalk:
-    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features spi-bus,xtalk -- --include-ignored test_calibrate_xtalk_report
+    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async --features spi-bus,xtalk -- --include-ignored test_calibrate_xtalk_report
 
 # ---------------------------------------------------------------------------
 # evo-f412re custom board (VL53L5CX or VL53L8CX, async DMA I2C)
