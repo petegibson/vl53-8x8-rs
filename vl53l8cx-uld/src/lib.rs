@@ -627,8 +627,19 @@ macro_rules! bind_platform_driver_spi {
                 embedded_hal::spi::Operation::Write(&addr_bytes),
                 embedded_hal::spi::Operation::Read(data_slice),
             ]) {
-                Ok(_) => 0,
-                Err(_) => 1,
+                Ok(_) => {
+                    #[cfg(feature = "defmt")]
+                    {
+                        defmt::trace!("spi R reg={:#06x} len={}", index, size);
+                        $crate::trace_data(data_slice);
+                    }
+                    0
+                }
+                Err(_) => {
+                    #[cfg(feature = "defmt")]
+                    defmt::trace!("spi R reg={:#06x} -> ERR", index);
+                    1
+                }
             }
         }
 
@@ -646,12 +657,21 @@ macro_rules! bind_platform_driver_spi {
             let data_slice = unsafe { core::slice::from_raw_parts(p_values, size as usize) };
             let addr_bytes = (index | 0x8000).to_be_bytes();
 
+            #[cfg(feature = "defmt")]
+            {
+                defmt::trace!("spi W reg={:#06x} len={}", index, size);
+                $crate::trace_data(data_slice);
+            }
             match embedded_hal::spi::SpiDevice::transaction(&mut comms.bus.spi, &mut [
                 embedded_hal::spi::Operation::Write(&addr_bytes),
                 embedded_hal::spi::Operation::Write(data_slice),
             ]) {
                 Ok(_) => 0,
-                Err(_) => 1,
+                Err(_) => {
+                    #[cfg(feature = "defmt")]
+                    defmt::trace!("spi W -> ERR");
+                    1
+                }
             }
         }
 
