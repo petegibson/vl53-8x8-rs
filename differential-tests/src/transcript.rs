@@ -12,7 +12,9 @@
 //!
 //! Blobs are the ULD tables shipped in `vl53-8x8`: the firmware image is
 //! included as bytes, the `uld_data.rs` arrays are parsed from the Rust source
-//! (they are `pub(crate)`), exactly as the Python script does.
+//! (they are `pub(crate)`), exactly as the Python script does. The VL53L5CX
+//! tables (`firmware_l5`, `default_configuration_l5`, `calibrate_xtalk_l5`)
+//! are the L8 ones with the `pub` patch tables of `vl53_8x8::sensor` applied.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -26,6 +28,7 @@ const ULD_DATA_RS: &str = include_str!("../../vl53-8x8/src/uld_data.rs");
 
 pub const RECORDING_C: &str = include_str!("../recordings/nucleo-l8-spi-uld.json");
 pub const RECORDING_RUST: &str = include_str!("../recordings/nucleo-l8-spi-8x8.json");
+pub const RECORDING_RUST_L5: &str = include_str!("../recordings/evo-l5-i2c-8x8.json");
 
 /// (Rust const name, blob name in the JSON)
 const RUST_BLOBS: [(&str, &str); 4] = [
@@ -34,6 +37,22 @@ const RUST_BLOBS: [(&str, &str); 4] = [
     ("GET_NVM_CMD", "get_nvm_cmd"),
     ("CALIBRATE_XTALK", "calibrate_xtalk"),
 ];
+
+/// (patched blob name, base blob name, patch table) for the VL53L5CX tables.
+const L5_BLOBS: [(&str, &str, &[(usize, u8)]); 3] = [
+    ("firmware_l5", "firmware", vl53_8x8::sensor::L5_FW_PATCH),
+    ("default_configuration_l5", "default_configuration", vl53_8x8::sensor::L5_CONFIG_PATCH),
+    ("calibrate_xtalk_l5", "calibrate_xtalk", vl53_8x8::sensor::L5_CALIBRATE_XTALK_PATCH),
+];
+
+/// `base` with every `(offset, value)` of `patch` overlaid.
+pub fn apply_patch(base: &[u8], patch: &[(usize, u8)]) -> Vec<u8> {
+    let mut out = base.to_vec();
+    for &(off, val) in patch {
+        out[off] = val;
+    }
+    out
+}
 
 /// Parse `const NAME: [u8; N] = [ 0x.., ... ];` arrays out of `uld_data.rs`.
 fn parse_rust_arrays(src: &str) -> HashMap<String, Vec<u8>> {
@@ -78,6 +97,11 @@ pub fn blobs() -> &'static HashMap<&'static str, Vec<u8>> {
                 .clone();
             m.insert(json_name, data);
         }
+        for (name, base, patch) in L5_BLOBS {
+            assert!(!patch.is_empty(), "{name}: empty patch table, blob would equal {base}");
+            let patched = apply_patch(&m[base], patch);
+            m.insert(name, patched);
+        }
         m
     })
 }
@@ -90,10 +114,10 @@ pub fn blob_name_of(data: &[u8]) -> Option<&'static str> {
     blobs().iter().find_map(|(name, blob)| {
         if blob.as_slice() == data {
             Some(*name)
-        } else if *name == "firmware" && data.len() >= 1024 {
+        } else if name.starts_with("firmware") && data.len() >= 64 {
             blob.windows(data.len()).position(|w| w == data).map(|off| {
                 // Leak one small string per distinct firmware slice; only used in failure output.
-                let s: &'static str = Box::leak(format!("firmware[{off}..{}]", off + data.len()).into_boxed_str());
+                let s: &'static str = Box::leak(format!("{name}[{off}..{}]", off + data.len()).into_boxed_str());
                 s
             })
         } else {
@@ -225,6 +249,13 @@ impl Recording {
     pub fn rust() -> &'static Recording {
         static R: OnceLock<Recording> = OnceLock::new();
         R.get_or_init(|| Recording::parse(RECORDING_RUST))
+    }
+
+    /// The committed recording of the pure-Rust evo-f412re suite on a
+    /// VL53L5CX over I2C (`examples/evo-f412re-embassy/tests/sensor_async.rs`).
+    pub fn rust_l5() -> &'static Recording {
+        static R: OnceLock<Recording> = OnceLock::new();
+        R.get_or_init(|| Recording::parse(RECORDING_RUST_L5))
     }
 
     pub fn sequence(&self, test: &str) -> Option<&Sequence> {

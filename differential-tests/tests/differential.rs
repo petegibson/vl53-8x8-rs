@@ -169,6 +169,15 @@ impl Driver for CDriver {
     fn set_caldata_xtalk(&mut self, buf: &mut [u8]) -> Result<(), CError> {
         self.sensor.set_caldata_xtalk(buf)
     }
+    fn calibrate_xtalk(&mut self, reflectance_percent: u8, nb_samples: u8, distance_mm: u16) -> Result<(), CError> {
+        self.sensor.calibrate_xtalk(u16::from(reflectance_percent), nb_samples, distance_mm)
+    }
+    fn firmware_error(e: &CError) -> Option<vl53_8x8::FirmwareError> {
+        match e {
+            vl53l8cx_uld::Error::Firmware(f) => Some(*f),
+            _ => None,
+        }
+    }
 }
 
 // --- harness ------------------------------------------------------------------

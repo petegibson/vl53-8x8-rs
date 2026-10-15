@@ -129,6 +129,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vl53-8x8",
+ "vl53l5cx-uld",
  "vl53l8cx-uld",
 ]
 

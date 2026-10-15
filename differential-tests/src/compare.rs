@@ -23,6 +23,29 @@ pub fn normalise(ops: &[Op]) -> Vec<Op> {
     out
 }
 
+/// Merge runs of writes that continue each other in the register space (the
+/// next write starts at `reg + len` of the previous one, no page-select write
+/// in between) into one write. **Diagnostic only**: the checks compare with
+/// [`normalise`] alone, and use this to find the next difference once a
+/// transcript is known to split a table write differently (the pure-Rust
+/// driver uploads a patched firmware bank in three writes around the patch
+/// window, ST's C code in one; see KNOWN_DIVERGENCES.md).
+pub fn coalesce_contiguous_writes(ops: &[Op]) -> Vec<Op> {
+    let mut out: Vec<Op> = Vec::with_capacity(ops.len());
+    for op in ops {
+        if op.dir == Dir::W && !op.err {
+            if let Some(last) = out.last_mut() {
+                if last.dir == Dir::W && !last.err && usize::from(last.reg) + last.data.len() == usize::from(op.reg) {
+                    last.data.extend_from_slice(&op.data);
+                    continue;
+                }
+            }
+        }
+        out.push(op.clone());
+    }
+    out
+}
+
 /// Compare two normalised transcripts. On a mismatch the message names the
 /// first differing op index, shows the op from each side and 3 ops of context
 /// before and after on both sides.

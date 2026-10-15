@@ -28,6 +28,14 @@ or one of the `uld_data.rs` arrays) is stored as a `blob` reference instead;
 expansion is exact, and every conversion verifies the round trip before
 writing. Shorter payloads always stay inline so the JSON stays unambiguous.
 
+The VL53L5CX tables are the VL53L8CX ones with a few bytes patched
+(`L5_FW_PATCH`, `L5_CONFIG_PATCH` in `vl53-8x8/src/sensor.rs`,
+`L5_CALIBRATE_XTALK_PATCH` in `uld_data.rs`); they are available as the blobs
+`firmware_l5`, `default_configuration_l5` and `calibrate_xtalk_l5`. A slice
+that is in both the L8 and the L5 table (most of the firmware) is referenced
+through the blob set of the recording's variant, so an L5 recording names
+only `*_l5` blobs for them.
+
 Usage:
 
     bus_trace_to_transcript.py LOG...               convert, writing
@@ -41,7 +49,9 @@ Usage:
     bus_trace_to_transcript.py --summary PATH...    per-sequence op/byte counts
 
 Driver, variant and bus are inferred from the file name (`-uld`/`-8x8`,
-`-l8-`/`-l5-`) and the trace prefix; override with --driver/--variant/--features.
+`-l8-`/`-l5-`) and the trace prefix (`spi`/`i2c`); override with
+--driver/--variant/--features. The default feature list is
+`thresholds,xtalk,motion`, plus `spi-bus` for an SPI recording.
 Python 3 standard library only.
 """
 
@@ -54,6 +64,7 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIRMWARE_BIN = REPO_ROOT / "vl53-8x8/src/vl53l8cx_fw_base.bin"
 ULD_DATA_RS = REPO_ROOT / "vl53-8x8/src/uld_data.rs"
+SENSOR_RS = REPO_ROOT / "vl53-8x8/src/sensor.rs"
 RECORDINGS_DIR = REPO_ROOT / "differential-tests/recordings"
 
 # Rust const name -> blob name in the JSON. Order matters only for the report.
@@ -63,10 +74,21 @@ RUST_BLOBS = {
     "GET_NVM_CMD": "get_nvm_cmd",
     "CALIBRATE_XTALK": "calibrate_xtalk",
 }
+# (patched blob name, base blob name, Rust patch const, file holding the const).
+# The patch consts are `&[(usize, u8)]` overlays on the L8 table.
+L5_PATCHES = [
+    ("firmware_l5", "firmware", "L5_FW_PATCH", "sensor"),
+    ("default_configuration_l5", "default_configuration", "L5_CONFIG_PATCH", "sensor"),
+    ("calibrate_xtalk_l5", "calibrate_xtalk", "L5_CALIBRATE_XTALK_PATCH", "uld_data"),
+]
 # Payloads shorter than this are always written inline.
 MIN_BLOB_LEN = 64
 
-DEFAULT_FEATURES = ["spi-bus", "thresholds", "xtalk", "motion"]
+DEFAULT_FEATURES = ["thresholds", "xtalk", "motion"]
+
+
+def default_features(bus):
+    return (["spi-bus"] if bus == "spi" else []) + DEFAULT_FEATURES
 
 TEST_RE = re.compile(r"^test tests::(\w+)\s+\.\.\.\s*(.*)$")
 RECORD_RE = re.compile(
@@ -80,14 +102,39 @@ END_RE = re.compile(r"^(ok|FAILED|test result:)")
 RUST_ARRAY_RE = re.compile(
     r"const\s+(\w+)\s*:\s*\[u8;\s*(\d+)\]\s*=\s*\[(.*?)\];", re.S
 )
+RUST_PATCH_RE = re.compile(
+    r"const\s+(\w+)\s*:\s*&\[\(usize,\s*u8\)\]\s*=\s*&\[(.*?)\];", re.S
+)
+PATCH_PAIR_RE = re.compile(r"\(\s*(0x[0-9A-Fa-f]+|\d+)\s*,\s*(0x[0-9A-Fa-f]+|\d+)\s*\)")
 
 
 # --------------------------------------------------------------------------
 # blobs
 # --------------------------------------------------------------------------
 
-def load_blobs(firmware_bin=FIRMWARE_BIN, uld_data_rs=ULD_DATA_RS):
-    """Return {blob_name: bytes} for the firmware image and the ULD tables."""
+def load_patches(texts):
+    """Return {const_name: [(offset, value)]} for the `&[(usize, u8)]` consts in `texts`."""
+    patches = {}
+    for text in texts.values():
+        for m in RUST_PATCH_RE.finditer(text):
+            name, body = m.group(1), m.group(2)
+            body = re.sub(r"//[^\n]*", "", body)
+            patches[name] = [(int(o, 0), int(v, 0)) for o, v in PATCH_PAIR_RE.findall(body)]
+    return patches
+
+
+def apply_patch(base, patch):
+    out = bytearray(base)
+    for off, val in patch:
+        if not 0 <= off < len(out):
+            raise ValueError(f"patch offset {off:#x} outside a {len(out)}-byte table")
+        out[off] = val
+    return bytes(out)
+
+
+def load_blobs(firmware_bin=FIRMWARE_BIN, uld_data_rs=ULD_DATA_RS, sensor_rs=SENSOR_RS):
+    """Return {blob_name: bytes} for the firmware image, the ULD tables and
+    their VL53L5CX-patched versions."""
     blobs = {"firmware": firmware_bin.read_bytes()}
     text = uld_data_rs.read_text()
     for m in RUST_ARRAY_RE.finditer(text):
@@ -101,15 +148,30 @@ def load_blobs(firmware_bin=FIRMWARE_BIN, uld_data_rs=ULD_DATA_RS):
     missing = set(RUST_BLOBS.values()) - set(blobs)
     if missing:
         sys.exit(f"{uld_data_rs}: arrays not found: {sorted(missing)}")
+    patches = load_patches({"sensor": sensor_rs.read_text(), "uld_data": text})
+    for name, base, const, _ in L5_PATCHES:
+        if const not in patches:
+            sys.exit(f"{sensor_rs} / {uld_data_rs}: patch table {const} not found")
+        if not patches[const]:
+            sys.exit(f"patch table {const} is empty; an L5 blob would equal the L8 one")
+        blobs[name] = apply_patch(blobs[base], patches[const])
     return blobs
 
 
-def find_blob(blobs, payload):
+def blob_order(blobs, variant):
+    """Blob names in matching order: the recording variant's own tables first,
+    so a slice common to both variants is named after the variant."""
+    l5 = [name for name, *_ in L5_PATCHES]
+    base = [n for n in blobs if n not in l5]
+    return l5 + base if variant == "L5" else base + l5
+
+
+def find_blob(blobs, payload, variant="L8"):
     """Return (name, offset) if `payload` is an exact slice of a blob, else None."""
     if len(payload) < MIN_BLOB_LEN:
         return None
-    for name, data in blobs.items():
-        off = data.find(payload)
+    for name in blob_order(blobs, variant):
+        off = blobs[name].find(payload)
         if off >= 0:
             return name, off
     return None
@@ -207,13 +269,13 @@ def parse_log(path):
 # transcript <-> ops
 # --------------------------------------------------------------------------
 
-def op_to_json(op, blobs):
+def op_to_json(op, blobs, variant):
     d = {"op": op.op, "reg": op.reg}
     if op.err:
         d["err"] = True
         d["len"] = op.len
         return d
-    hit = find_blob(blobs, bytes(op.data))
+    hit = find_blob(blobs, bytes(op.data), variant)
     if hit:
         name, off = hit
         d.update(blob=name, offset=off, len=len(op.data))
@@ -259,9 +321,9 @@ def build_transcript(log_path, bus, sequences, blobs, driver, variant, features)
         "driver": driver,
         "variant": variant,
         "bus": bus,
-        "features": features,
+        "features": features if features is not None else default_features(bus),
         "sequences": [
-            {"test": name, "stats": stats_for(ops), "ops": [op_to_json(op, blobs) for op in ops]}
+            {"test": name, "stats": stats_for(ops), "ops": [op_to_json(op, blobs, variant) for op in ops]}
             for name, ops in sequences
         ],
     }
@@ -405,15 +467,18 @@ def main():
     ap.add_argument("--summary", action="store_true", help="print per-sequence statistics")
     ap.add_argument("--driver", help="override the driver name inferred from the file name")
     ap.add_argument("--variant", help="override the sensor variant (L8/L5)")
-    ap.add_argument("--features", nargs="*", default=DEFAULT_FEATURES,
-                    help="cargo features the recording was made with")
+    ap.add_argument("--features", nargs="*", default=None,
+                    help="cargo features the recording was made with "
+                         "(default: thresholds xtalk motion, plus spi-bus for SPI)")
     ap.add_argument("--firmware", type=pathlib.Path, default=FIRMWARE_BIN)
     ap.add_argument("--uld-data", type=pathlib.Path, default=ULD_DATA_RS)
+    ap.add_argument("--sensor-rs", type=pathlib.Path, default=SENSOR_RS,
+                    help="vl53-8x8 sensor.rs holding the L5 patch tables")
     args = ap.parse_args()
 
     if args.output and len(args.paths) != 1:
         ap.error("-o needs exactly one input")
-    blobs = load_blobs(args.firmware, args.uld_data)
+    blobs = load_blobs(args.firmware, args.uld_data, args.sensor_rs)
 
     ok = True
     for path in args.paths:

@@ -1,4 +1,4 @@
-//! Host-side differential test harness for the two VL53L8CX drivers.
+//! Host-side differential test harness for the VL53L8CX / VL53L5CX drivers.
 //!
 //! The pieces, bottom up:
 //!
@@ -12,10 +12,13 @@
 //!   [`Op`], the same shape as the JSON.
 //! * [`compare`]: normalisation (collapse runs of identical reads) and a diff
 //!   that points at the first differing op with context.
-//! * [`driver`]: the `Driver` trait both sensors are driven through, the
-//!   `vl53-8x8` adapter (driven with a minimal `block_on`), and the call
-//!   sequences re-enacting the on-target tests. The C adapter lives in
-//!   `tests/differential.rs` because its platform symbols are `#[no_mangle]`.
+//! * [`driver`]: the `Driver` trait all drivers are driven through, the
+//!   `vl53-8x8` adapter (driven with a minimal `block_on`, over the blocking
+//!   SPI or I2C bus adapter), and the call sequences re-enacting the on-target
+//!   tests (Nucleo suites: [`run_sequence`]; evo-f412re suite:
+//!   [`run_evo_sequence`]). The C adapters live in `tests/differential.rs`
+//!   (L8 ULD) and `tests/differential_l5.rs` (L5 ULD) because their platform
+//!   symbols are `#[no_mangle]`.
 
 use std::fmt;
 
@@ -25,8 +28,8 @@ pub mod mock;
 pub mod model;
 pub mod transcript;
 
-pub use compare::{compare, normalise};
-pub use driver::{run_sequence, Driver, RustDriver, SEQUENCES};
+pub use compare::{coalesce_contiguous_writes, compare, normalise};
+pub use driver::{run_evo_sequence, run_sequence, Driver, RustDriver, EVO_SEQUENCES, SEQUENCES};
 pub use mock::{block_on, MockDelay, MockI2c, MockPin, MockSpi, Shared};
 pub use model::RegisterModel;
 pub use transcript::{Recording, Sequence};
