@@ -1,0 +1,47 @@
+[package]
+name = "nucleo-f401re-rtic"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = { version = "1", features = ["print-defmt"] }
+rtic = { version = "2.3", features = ["thumbv7-backend"] }
+rtic-monotonics = { version = "2.2", features = ["cortex-m-systick"] }
+stm32f4xx-hal = { version = "0.23", features = ["stm32f401"] }
+embedded-hal = "1.0"
+embedded-hal-bus = { version = "0.3", optional = true }
+vl53-8x8 = { path = "../../vl53-8x8" }
+
+[features]
+default = []
+# SPI1 + ExclusiveDevice + vl53_8x8::BlockingSpi; shield jumpered to SPI mode.
+spi-bus = ["dep:embedded-hal-bus"]
+defmt-bus-trace = ["vl53-8x8/defmt"]
+xtalk = ["vl53-8x8/xtalk"]
+motion = ["vl53-8x8/motion"]
+thresholds = ["vl53-8x8/thresholds"]
+# Targets per zone (default 1); mutually exclusive, forwarded to the driver.
+targets-2 = ["vl53-8x8/targets-2"]
+targets-3 = ["vl53-8x8/targets-3"]
+targets-4 = ["vl53-8x8/targets-4"]
+
+[[bin]]
+name = "nucleo-f401re-rtic"
+test = false
+bench = false
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"
+
+# Standalone root: this demo is excluded from the parent workspace.
+[workspace]

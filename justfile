@@ -15,6 +15,7 @@ evo_probe    := "0483:3754:003400273431511837393330"
 
 nucleo_uld     := "examples/nucleo-f401re-uld"
 nucleo_embassy := "examples/nucleo-f401re-embassy"
+nucleo_rtic    := "examples/nucleo-f401re-rtic"
 evo            := "examples/evo-f412re-embassy"
 rpi            := "examples/rpi-zero-2w"
 
@@ -46,6 +47,14 @@ nucleo-uld features="spi-bus":
 nucleo-embassy features="spi-bus":
     cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async --features "{{features}}"
     cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features "{{features}}"
+
+# Not a test suite: `probe-rs run` streams defmt forever, so `timeout` ends it after 25 s and
+# `|| true` keeps that from failing the recipe. Read the log: init, variant, one 4x4 grid per
+# second, and the heartbeat ticks in between.
+
+# RTIC 2 + blocking stm32f4xx-hal demo on the Nucleo (BlockingI2c/BlockingSpi); runs for 25 s, e.g. `just nucleo-rtic` (I2C: `just nucleo-rtic ""`).
+nucleo-rtic features="spi-bus":
+    cd {{nucleo_rtic}} && PROBE_RS_PROBE={{nucleo_probe}} timeout 25 cargo run --release --features "{{features}}" || true
 
 # --- hardware: evo-f412re custom board (VL53L5CX or VL53L8CX, async DMA I2C) --
 

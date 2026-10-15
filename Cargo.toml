@@ -11,6 +11,7 @@ members = [
 exclude = [
     "examples/nucleo-f401re-uld",
     "examples/nucleo-f401re-embassy",
+    "examples/nucleo-f401re-rtic",
     "examples/evo-f412re-embassy",
     "examples/rpi-zero-2w",
 ]

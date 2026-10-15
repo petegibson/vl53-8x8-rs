@@ -26,6 +26,7 @@ Two drivers share one set of types:
 | [`vl53l5cx-uld-sys`](./vl53l5cx-uld-sys) | ST's VL53L5CX ULD, compiled the same way. **Unpublished** test oracle: lets `vl53-8x8` check its L5 firmware/config patches against ST's L5 arrays byte for byte. |
 | [`examples/nucleo-f401re-uld/`](./examples/nucleo-f401re-uld) | Demo: blocking (`vl53l8cx-uld`) on STM32F401RE Nucleo + X-NUCLEO-53L8A1, I²C or SPI (`spi-bus`). |
 | [`examples/nucleo-f401re-embassy/`](./examples/nucleo-f401re-embassy) | Demo: async (`vl53-8x8`, Embassy) on the same board.           |
+| [`examples/nucleo-f401re-rtic/`](./examples/nucleo-f401re-rtic) | Demo: `vl53-8x8` under RTIC 2 with the blocking `stm32f4xx-hal` via the `BlockingI2c` / `BlockingSpi` adapters, same board. |
 | [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy) | Demo: async (`vl53-8x8`, Embassy) on a custom STM32F412RE board, DMA I²C, L5 or L8, two sensors on one bus. |
 | [`examples/rpi-zero-2w/`](./examples/rpi-zero-2w) | Demo: Linux on Raspberry Pi Zero 2W, both drivers, SPI via `linux-embedded-hal`. |
 
@@ -45,6 +46,10 @@ this repository:
   (`stm32f4xx-hal`) and async (`embassy-stm32`) execution. See
   [`examples/nucleo-f401re-uld/`](./examples/nucleo-f401re-uld) and
   [`examples/nucleo-f401re-embassy/`](./examples/nucleo-f401re-embassy).
+  The RTIC 2 variant of the same setup (`vl53-8x8` over the blocking HAL,
+  [`examples/nucleo-f401re-rtic/`](./examples/nucleo-f401re-rtic)) is
+  verified over SPI: firmware upload, 4x4 ranging at 10 Hz and a concurrent
+  1 Hz RTIC task.
 * **Bare-metal Cortex-M4, async DMA I²C** — custom STM32F412RE board with a
   VL53L8CX, pure-Rust `vl53-8x8` driver including the firmware upload path.
   See [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy).

@@ -58,7 +58,12 @@ loop {
 ```
 
 - A blocking `embedded_hal::i2c::I2c` can be used through the `BlockingI2c`
-  wrapper (useful where the HAL's async I2C is unreliable).
+  wrapper (useful where the HAL's async I2C is unreliable), and a blocking
+  `embedded_hal::spi::SpiDevice` through `BlockingSpi`. Both speak the same
+  wire protocol as the async paths; only the transfers block, the driver's
+  delays still yield. This is how the driver runs on a blocking HAL without
+  an async executor, e.g. `stm32f4xx-hal` under RTIC 2 with the SysTick
+  monotonic as the `DelayNs` (`examples/nucleo-f401re-rtic`).
 - `with_address` + `redetect` re-attach a handle to a sensor already moved
   with `set_i2c_address`, without re-uploading firmware; see the
   `examples/evo-f412re-embassy` demo for two sensors on one bus.
@@ -122,6 +127,9 @@ Verified with this crate layout, via the demo crates' on-target test suites:
 * STM32F401RE Nucleo + X-NUCLEO-53L8A1 shield (VL53L8CX) over SPI and over
   I2C, both true async DMA I2C and the `BlockingI2c` adapter
   (`examples/nucleo-f401re-embassy`, embassy-stm32 0.6 / embassy-executor 0.10).
+  The RTIC 2 + `stm32f4xx-hal` 0.23 demo on the same board
+  (`examples/nucleo-f401re-rtic`, `BlockingSpi` over SPI) is verified:
+  firmware upload, 4x4 ranging at 10 Hz alongside a 1 Hz RTIC task.
 * STM32F412RE custom board over async DMA I2C, with both a VL53L8CX and a
   VL53L5CX fitted in turn: autodetect, the patched-firmware upload path and
   the full test suite pass on each (`examples/evo-f412re-embassy`).

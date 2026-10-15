@@ -10,7 +10,8 @@ code, no FFI and no build script, so it builds for any target without libclang.
 It detects the connected part at runtime ([`detect`], [`Variant`]) and uploads a
 single shared firmware image patched per variant ([`firmware`], [`sensor`]).
 The entry point is [`Sensor`]; [`Spi`] adapts an `SpiDevice` to the bus trait
-and [`BlockingI2c`] wraps a blocking `embedded-hal` I2C bus.
+and [`BlockingI2c`] / [`BlockingSpi`] wrap blocking `embedded-hal` I2C and SPI
+buses (blocking HALs, RTIC 2, no executor).
 
 Crate family:
 
@@ -89,7 +90,7 @@ const NB_THRESHOLDS: usize = VL53L8CX_NB_THRESHOLDS as usize;
 #[cfg(any(feature = "motion", feature = "thresholds"))]
 pub use types::MotionConfiguration;
 
-pub use bus::{BlockingI2c, Spi};
+pub use bus::{BlockingI2c, BlockingSpi, Spi};
 pub use firmware::{FirmwareSource, PatchedFirmware, SliceFirmware};
 pub use sensor::{detect, Variant};
 
