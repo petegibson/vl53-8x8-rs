@@ -7,7 +7,15 @@ loosened to hide them; run `cargo test -p differential-tests -- --include-ignore
 to see the current diff. Neither driver has been changed by the differential
 test work; what to do about each entry is a separate decision.
 
-## 1. `test_detection_thresholds`: detection thresholds are scaled twice by `vl53l8cx-uld`
+## 1. `test_detection_thresholds`: detection thresholds were scaled twice by `vl53l8cx-uld` — FIXED
+
+**Status: fixed** (same day). The wrapper's `scale_thresholds_for_write/read`
+were removed from `vl53l8cx-uld` and the freshly ported `vl53l5cx-uld`; ST's
+ULD does the scaling. The C recording was re-taken on hardware with the fixed
+wrapper and the differential check is no longer ignored. The original
+analysis is kept below for the record.
+
+### Original report
 
 **Call**: `set_detection_thresholds` with zone 0 `{ measurement: DistanceMm,
 threshold_type: LessThanEqualMin, low_threshold: 500, high_threshold: 0 }`,

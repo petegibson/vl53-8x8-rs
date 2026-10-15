@@ -816,40 +816,15 @@ where
     BUS: VlBus<Error = E>,
     D: DelayNs,
 {
-    fn scale_thresholds_for_read(thresholds: &mut [DetectionThreshold]) {
-        for t in thresholds.iter_mut() {
-            let scale = match t.measurement {
-                ThresholdMeasurement::DistanceMm => 4,
-                ThresholdMeasurement::SignalPerSpadKcps | ThresholdMeasurement::AmbientPerSpadKcps => 2048,
-                ThresholdMeasurement::RangeSigmaMm => 128,
-                ThresholdMeasurement::NbSpadsEnabled => 256,
-                ThresholdMeasurement::MotionIndicator => 65535,
-                _ => 1,
-            };
-            if scale != 1 {
-                t.low_threshold /= scale as i32;
-                t.high_threshold /= scale as i32;
-            }
-        }
-    }
-
-    fn scale_thresholds_for_write(thresholds: &mut [DetectionThreshold]) {
-        for t in thresholds.iter_mut() {
-            let scale = match t.measurement {
-                ThresholdMeasurement::DistanceMm => 4,
-                ThresholdMeasurement::SignalPerSpadKcps | ThresholdMeasurement::AmbientPerSpadKcps => 2048,
-                ThresholdMeasurement::RangeSigmaMm => 128,
-                ThresholdMeasurement::NbSpadsEnabled => 256,
-                ThresholdMeasurement::MotionIndicator => 65535,
-                _ => 1,
-            };
-            if scale != 1 {
-                t.low_threshold *= scale as i32;
-                t.high_threshold *= scale as i32;
-            }
-        }
-    }
-
+    /// Read the 64 detection-threshold entries.
+    ///
+    /// Values are in the units of each entry's `measurement` (mm, kcps/SPAD, ...).
+    /// ST's ULD converts to and from the firmware's fixed-point representation
+    /// itself (x4 for distance, x2048 for per-SPAD rates, x128 for sigma, x256
+    /// for SPAD count, x65535 for the motion indicator), so this wrapper passes
+    /// the values through unchanged. An earlier version scaled them a second
+    /// time, which the symmetric set/get round trip hid but which put x16 (for
+    /// mm) on the wire; the differential tests against `vl53-8x8` caught it.
     pub fn get_detection_thresholds(&mut self) -> Result<[DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize], Error<E>> {
         self.bind_platform();
         let mut raw_thresholds: [sys::VL53L8CX_DetectionThresholds; VL53L8CX_NB_THRESHOLDS as usize] = unsafe { core::mem::zeroed() };
@@ -860,18 +835,16 @@ where
             return Err(Error::Firmware(status.into()));
         }
 
-        let mut rust_thresholds: [DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize] = unsafe {
+        let rust_thresholds: [DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize] = unsafe {
             core::mem::transmute(raw_thresholds)
         };
 
-        Self::scale_thresholds_for_read(&mut rust_thresholds);
 
         Ok(rust_thresholds)
     }
 
-    pub fn set_detection_thresholds(&mut self, mut thresholds: [DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize]) -> Result<(), Error<E>> {
+    pub fn set_detection_thresholds(&mut self, thresholds: [DetectionThreshold; VL53L8CX_NB_THRESHOLDS as usize]) -> Result<(), Error<E>> {
         self.bind_platform();
-        Self::scale_thresholds_for_write(&mut thresholds);
 
         let raw_thresholds: [sys::VL53L8CX_DetectionThresholds; VL53L8CX_NB_THRESHOLDS as usize] = unsafe {
             core::mem::transmute(thresholds)

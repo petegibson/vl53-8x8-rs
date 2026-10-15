@@ -305,7 +305,7 @@ seq_tests! {
     test_wait_for_data_ready_blocking,
     test_detection_thresholds_enable,
     test_detection_thresholds_auto_stop,
-    test_detection_thresholds [ignore = "KNOWN_DIVERGENCES.md #1: vl53l8cx-uld scales thresholds twice (x16 on the wire), vl53-8x8 once (x4)"],
+    test_detection_thresholds,
     test_motion_indicator_init,
     test_motion_indicator_set_distance,
     test_motion_indicator_set_resolution,
