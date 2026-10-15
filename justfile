@@ -1,5 +1,5 @@
 # Host + hardware test matrix for the VL53L5CX / VL53L8CX drivers.
-# `just --list` shows the recipes by section; `just <recipe>` runs one.
+# `just --list` shows the recipes grouped by target; `just <recipe>` runs one.
 #
 # Hardware recipes flash and run the embedded-test suites in examples/ via
 # probe-rs. The Nucleo + X-NUCLEO-53L8A1 shield must be jumpered into SPI
@@ -24,41 +24,89 @@ default:
     @just --list
 
 # ---------------------------------------------------------------------------
-# tests (host)
+# host
 # ---------------------------------------------------------------------------
 
 # Host tests, all crates (oracle tests need libclang)
-[group('tests')]
+[group('host')]
 test:
     cargo test --workspace
 
 # Dry-run publish of the four library crates
-[group('tests')]
+[group('host')]
 publish-dry-run:
     cargo publish --workspace --dry-run
 
 # ---------------------------------------------------------------------------
-# hardware: on-target suites
+# Nucleo F401RE + X-NUCLEO-53L8A1 (VL53L8CX)
 # ---------------------------------------------------------------------------
 
-# Nucleo, blocking ULD suite (e.g. `spi-bus,thresholds`)
-[group('hardware')]
+# Blocking ULD suite (e.g. `spi-bus,thresholds`)
+[group('nucleo-f401re')]
 nucleo-uld features="spi-bus":
     cd {{nucleo_uld}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor --features "{{features}}"
 
-# Nucleo, Embassy suites (sensor_async + sensor_async_extra)
-[group('hardware')]
+# Embassy suites (sensor_async + sensor_async_extra)
+[group('nucleo-f401re')]
 nucleo-embassy features="spi-bus":
     cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async --features "{{features}}"
     cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features "{{features}}"
 
-# evo board, Embassy suite; e.g. `just evo targets-2`
-[group('hardware')]
+# `probe-rs run` streams defmt until killed, so `timeout` ends the run after
+# 25 s and `|| true` keeps that from failing the recipe. Expect init, the
+# detected variant, one 4x4 grid per second and the heartbeat ticks between.
+
+# RTIC 2 demo for 25 s (I2C: `just nucleo-rtic ""`)
+[group('nucleo-f401re')]
+nucleo-rtic features="spi-bus":
+    cd {{nucleo_rtic}} && PROBE_RS_PROBE={{nucleo_probe}} timeout 25 cargo run --release --features "{{features}}" || true
+
+# The three reports below are #[ignore]d tests: they print and warn, never fail.
+
+# Multi-target report; needs a two-surface scene
+[group('nucleo-f401re')]
+scene-nucleo features="spi-bus,targets-2":
+    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async --features "{{features}}" -- --include-ignored test_multi_target_scene_report
+
+# Motion report; wave something in view while it runs
+[group('nucleo-f401re')]
+motion-nucleo:
+    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features spi-bus,motion,xtalk -- --include-ignored test_motion_indicator_report
+
+# Xtalk calibration report (before/after frames)
+[group('nucleo-f401re')]
+xtalk-report-nucleo:
+    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features spi-bus,xtalk -- --include-ignored test_calibrate_xtalk_report
+
+# ---------------------------------------------------------------------------
+# evo-f412re custom board (VL53L5CX or VL53L8CX, async DMA I2C)
+# ---------------------------------------------------------------------------
+
+# Embassy suite; e.g. `just evo targets-2`
+[group('evo-f412re')]
 evo features="":
     cd {{evo}} && PROBE_RS_PROBE={{evo_probe}} cargo test --test sensor_async --release --features "{{features}}"
 
+# Multi-target report (#[ignore]d); needs a two-surface scene
+[group('evo-f412re')]
+scene-evo features="targets-2":
+    cd {{evo}} && PROBE_RS_PROBE={{evo_probe}} cargo test --test sensor_async --release --features "{{features}}" -- --include-ignored multi_target_scene_report
+
+# ---------------------------------------------------------------------------
+# Raspberry Pi Zero 2W
+# ---------------------------------------------------------------------------
+
+# Static musl bins (spidev setup: see its README)
+[group('pi-zero-2w')]
+pi-build:
+    cd {{rpi}} && cargo build --release --target aarch64-unknown-linux-musl
+
+# ---------------------------------------------------------------------------
+# all boards
+# ---------------------------------------------------------------------------
+
 # Full matrix; Nucleo in SPI mode, both boards connected
-[group('hardware')]
+[group('all-boards')]
 hw-matrix:
     just nucleo-uld spi-bus
     just nucleo-uld spi-bus,thresholds
@@ -71,45 +119,3 @@ hw-matrix:
     just evo targets-2
     just evo targets-4
     just evo xtalk
-
-# ---------------------------------------------------------------------------
-# demos: run a binary and watch its defmt log
-# ---------------------------------------------------------------------------
-
-# `probe-rs run` streams defmt until killed, so `timeout` ends the run after
-# 25 s and `|| true` keeps that from failing the recipe. Expect init, the
-# detected variant, one 4x4 grid per second and the heartbeat ticks between.
-
-# Nucleo, RTIC 2 demo for 25 s (I2C: `just nucleo-rtic ""`)
-[group('demos')]
-nucleo-rtic features="spi-bus":
-    cd {{nucleo_rtic}} && PROBE_RS_PROBE={{nucleo_probe}} timeout 25 cargo run --release --features "{{features}}" || true
-
-# Pi Zero 2W, static musl bins (spidev setup: see its README)
-[group('demos')]
-pi-build:
-    cd {{rpi}} && cargo build --release --target aarch64-unknown-linux-musl
-
-# ---------------------------------------------------------------------------
-# reports: #[ignore]d scene / human-assisted tests (print and warn, never fail)
-# ---------------------------------------------------------------------------
-
-# Nucleo multi-target report; needs a two-surface scene
-[group('reports')]
-scene-nucleo features="spi-bus,targets-2":
-    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async --features "{{features}}" -- --include-ignored test_multi_target_scene_report
-
-# evo multi-target report; needs a two-surface scene
-[group('reports')]
-scene-evo features="targets-2":
-    cd {{evo}} && PROBE_RS_PROBE={{evo_probe}} cargo test --test sensor_async --release --features "{{features}}" -- --include-ignored multi_target_scene_report
-
-# Nucleo motion report; wave something in view while it runs
-[group('reports')]
-motion-nucleo:
-    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features spi-bus,motion,xtalk -- --include-ignored test_motion_indicator_report
-
-# Nucleo xtalk calibration report (before/after frames)
-[group('reports')]
-xtalk-report-nucleo:
-    cd {{nucleo_embassy}} && PROBE_RS_PROBE={{nucleo_probe}} cargo test --test sensor_async_extra --features spi-bus,xtalk -- --include-ignored test_calibrate_xtalk_report
