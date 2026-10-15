@@ -6,6 +6,7 @@ members = [
     "vl53l8cx-uld",
     "vl53l5cx-uld",
     "vl53-8x8",
+    "differential-tests",
 ]
 # Board demo crates: standalone roots with their own target/HAL/linker
 # config, not published.

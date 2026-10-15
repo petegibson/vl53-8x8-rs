@@ -34,6 +34,16 @@ default:
 test:
     cargo test --workspace
 
+# Test: C ULD vs pure-Rust bus transcripts against recorded sensor responses
+[group('host')]
+test-differential:
+    cargo test -p differential-tests
+
+# Build: regenerate recordings/*.json from raw trace logs (see README)
+[group('host')]
+build-recording log:
+    python3 tools/bus_trace_to_transcript.py --summary "{{log}}"
+
 # Maintainer only: dry-run publish of the four library crates.
 [private]
 publish-dry-run:

@@ -1,0 +1,28 @@
+[package]
+name = "differential-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Host-side differential test: the pure-Rust vl53-8x8 driver and the C-ULD wrapper vl53l8cx-uld must emit byte-identical bus traffic against recorded sensor responses."
+license = "BSD-3-Clause"
+
+# Everything here is test code. The library holds the mock bus, the register
+# model and the shared call sequences; the single integration test binary
+# holds the drivers, because the C ULD's `#[no_mangle]` platform symbols can be
+# defined only once per binary.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+vl53-8x8 = { path = "../vl53-8x8", features = ["xtalk", "motion", "thresholds"] }
+vl53l8cx-uld = { path = "../vl53l8cx-uld", features = ["xtalk", "motion", "thresholds"] }
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# `bind_platform_driver_spi!` expands `cfg(feature = "defmt")` into this crate,
+# which has no such feature; tell rustc the value is expected.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("defmt"))'] }
