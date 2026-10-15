@@ -4,17 +4,20 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
-description = "Raw FFI bindings (bindgen + cc) to the STMicroelectronics VL53L5CX Ultra Lite Driver (ULD) C sources. Unpublished; used only as a test oracle for the pure-Rust vl53-8x8 driver."
+description = "Raw FFI bindings (bindgen + cc) to the STMicroelectronics VL53L5CX Ultra Lite Driver (ULD) C sources. Unpublished; backs the vl53l5cx-uld wrapper and serves as a test oracle for the pure-Rust vl53-8x8 driver."
 readme = "README.md"
 links = "vl53l5cx_uld"
-# Test oracle only. The pure-Rust `vl53-8x8` driver covers the VL53L5CX for
+# Not published (yet). The pure-Rust `vl53-8x8` driver covers the VL53L5CX for
 # users; this crate exists so its L5 firmware/config patches can be checked
-# byte-for-byte against ST's own L5 arrays. Path-only dev-dependencies are
-# stripped from published manifests, so it never needs to be on crates.io.
+# byte-for-byte against ST's own L5 arrays, and so the `vl53l5cx-uld` wrapper
+# can drive ST's L5 C code in host-side differential tests. Path-only
+# dev-dependencies are stripped from published manifests. If `vl53l5cx-uld`
+# is ever published, publish this crate first and drop this line.
 publish = false
 
 [dependencies]
 cty = "0.2"
+vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.0" }
 
 [build-dependencies]
 bindgen = "0.69"
@@ -22,12 +25,26 @@ cc = "1.2"
 
 [features]
 # Standard Plugin Features (Opt-in to include)
-xtalk = []
-motion = []
-thresholds = []
+xtalk = ["vl53-8x8-types/xtalk"]
+motion = ["vl53-8x8-types/motion"]
+thresholds = ["vl53-8x8-types/thresholds"]
 
 # --- Raw Firmware Format ---
 raw-format = []
+
+# --- Targets per zone ---
+# Select `VL53L5CX_NB_TARGET_PER_ZONE` for the C build and the bindgen pass.
+# The default (no feature, or `targets-1`) is one target per zone. Enabling
+# more than one `targets-N` feature is a build error (`build.rs` panics):
+# the macro can only take a single value, and cargo unions features across
+# the dependency graph, so a silent "highest wins" rule would let one crate
+# change the `VL53L5CX_ResultsData` layout another crate was written for.
+# Per-target result arrays (`distance_mm`, `target_status`, ...) then hold
+# `64 * N` entries indexed `zone * N + target`.
+targets-1 = []
+targets-2 = []
+targets-3 = []
+targets-4 = []
 
 # --- Output Disablement Features for Size Optimization (Opt-in to DISABLE/remove) ---
 disable-ambient = []

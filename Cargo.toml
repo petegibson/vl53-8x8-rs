@@ -4,6 +4,7 @@ members = [
     "vl53l8cx-uld-sys",
     "vl53l5cx-uld-sys",
     "vl53l8cx-uld",
+    "vl53l5cx-uld",
     "vl53-8x8",
 ]
 # Board demo crates: standalone roots with their own target/HAL/linker

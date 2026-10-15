@@ -1,0 +1,51 @@
+[package]
+name = "vl53l5cx-uld"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+license = "BSD-3-Clause"
+description = "Blocking embedded-hal wrapper over STMicroelectronics' VL53L5CX Ultra Lite Driver (ULD) C library"
+readme = "README.md"
+keywords = ["vl53l5cx", "tof", "embedded-hal", "no-std", "uld"]
+categories = ["embedded", "no-std", "hardware-support"]
+# Not published (yet): it exists so host-side differential tests can drive
+# ST's VL53L5CX C code against a mock bus, with the same API as `vl53l8cx-uld`.
+# Users wanting a VL53L5CX driver should use the pure-Rust `vl53-8x8`. To
+# publish later, publish `vl53l5cx-uld-sys` first and drop both `publish`
+# lines.
+publish = false
+
+[package.metadata.docs.rs]
+features = ["xtalk", "motion", "thresholds"]
+
+[dependencies]
+embedded-hal = "1.0.0" # Using the stable 1.0 version of the hardware abstraction layer.
+vl53l5cx-uld-sys = { path = "../vl53l5cx-uld-sys", version = "0.1.0" }
+defmt = { version = "1", optional = true }
+
+[features]
+default = []
+
+xtalk = ["vl53l5cx-uld-sys/xtalk"]
+motion = ["vl53l5cx-uld-sys/motion"]
+thresholds = ["vl53l5cx-uld-sys/thresholds"]
+raw-format = ["vl53l5cx-uld-sys/raw-format"]
+
+# Targets per zone (`VL53L5CX_NB_TARGET_PER_ZONE`): exactly one may be enabled,
+# `targets-1` is the default. Per-target result arrays then hold `64 * N`
+# entries indexed `zone * NB_TARGET_PER_ZONE + target`.
+targets-1 = ["vl53l5cx-uld-sys/targets-1"]
+targets-2 = ["vl53l5cx-uld-sys/targets-2"]
+targets-3 = ["vl53l5cx-uld-sys/targets-3"]
+targets-4 = ["vl53l5cx-uld-sys/targets-4"]
+
+# Output disablement features for size optimization (opt-in to DISABLE/remove)
+disable-ambient = ["vl53l5cx-uld-sys/disable-ambient"]
+disable-spads = ["vl53l5cx-uld-sys/disable-spads"]
+disable-nb-targets = ["vl53l5cx-uld-sys/disable-nb-targets"]
+disable-signal = ["vl53l5cx-uld-sys/disable-signal"]
+disable-range-sigma = ["vl53l5cx-uld-sys/disable-range-sigma"]
+disable-distance = ["vl53l5cx-uld-sys/disable-distance"]
+disable-target-status = ["vl53l5cx-uld-sys/disable-target-status"]
+disable-reflectance = ["vl53l5cx-uld-sys/disable-reflectance"]
+disable-motion-indicator-output = ["vl53l5cx-uld-sys/disable-motion-indicator-output"]
