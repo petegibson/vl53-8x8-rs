@@ -30,7 +30,7 @@ cargo run --release --features spi-bus  # SPI1 @ 1 MHz (PB3/PB4/PB5, NCS PB6), B
 ```
 
 `probe-rs run` (configured in `.cargo/config.toml`) flashes and streams defmt
-until you stop it. From the repository root, `just nucleo-rtic [features]`
+until you stop it. From the repository root, `just run-nucleo-rtic [features]`
 does the same with a 25 s timeout.
 
 Plugin features forward to the driver like in the other demos: `xtalk`,
