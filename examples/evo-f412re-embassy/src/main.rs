@@ -320,7 +320,7 @@ fn log_grid(label: &str, data: &ResultsData, grid: usize, object_near: bool) {
 
 /// Full power-on sequence: cut the rail, bring it back, release reset, and gate
 /// off the second sensor so only the always-on sensor enumerates at the default
-/// address. Matches the production board bring-up timing. Used on first start
+/// address. Matches the board's bring-up timing. Used on first start
 /// and as the heavier recovery step.
 async fn power_on_sequence(
     pwr_en: &mut Output<'static>,

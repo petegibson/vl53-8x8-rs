@@ -27,7 +27,7 @@ Two drivers share one set of types:
 | [`examples/nucleo-f401re-uld/`](./examples/nucleo-f401re-uld) | Demo: blocking (`vl53l8cx-uld`) on STM32F401RE Nucleo + X-NUCLEO-53L8A1, I²C or SPI (`spi-bus`). |
 | [`examples/nucleo-f401re-embassy/`](./examples/nucleo-f401re-embassy) | Demo: async (`vl53-8x8`, Embassy) on the same board.           |
 | [`examples/nucleo-f401re-rtic/`](./examples/nucleo-f401re-rtic) | Demo: `vl53-8x8` under RTIC 2 with the blocking `stm32f4xx-hal` via the `BlockingI2c` / `BlockingSpi` adapters, same board. |
-| [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy) | Demo: async (`vl53-8x8`, Embassy) on a custom STM32F412RE board, DMA I²C, L5 or L8, two sensors on one bus. |
+| [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy) | Demo: async (`vl53-8x8`, Embassy) on the maintainers' custom STM32F412RE test PCB (see its README), DMA I²C, L5 or L8, two sensors on one bus. |
 | [`examples/evo-f412re-uld/`](./examples/evo-f412re-uld) | Demo: blocking (`vl53l5cx-uld`, ST's VL53L5CX C ULD) on the same STM32F412RE board, I²C; VL53L5CX only. |
 | [`examples/rpi-zero-2w/`](./examples/rpi-zero-2w) | Demo: Linux on Raspberry Pi Zero 2W, both drivers, SPI via `linux-embedded-hal`. |
 

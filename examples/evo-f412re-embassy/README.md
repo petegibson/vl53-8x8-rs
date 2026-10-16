@@ -1,5 +1,11 @@
 # evo-f412re-embassy
 
+> **Note:** this example targets a custom in-house PCB used to test the
+> multi-sensor arrangement (two sensors on one I2C bus). It is kept in the
+> repository because it is the maintainers' L5/L8 async-I2C test hardware. If
+> you are looking for a starting point on a board you can buy, see the
+> `nucleo-f401re-*` examples.
+
 Async VL53L5CX / VL53L8CX ranging demo for a custom **STM32F412RE** board.
 
 The driver autodetects which sensor variant is fitted (from the silicon

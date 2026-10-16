@@ -1,5 +1,10 @@
 # evo-f412re-uld
 
+> **Note:** this example targets a custom in-house PCB used to test the
+> multi-sensor arrangement (two sensors on one I2C bus). It is kept in the
+> repository because it is the maintainers' VL53L5CX test hardware for the C
+> wrapper. For a board you can buy, see the `nucleo-f401re-*` examples.
+
 **VL53L5CX** on the custom **STM32F412RE** "evo" board through ST's C Ultra
 Lite Driver, via the blocking [`vl53l5cx-uld`](../../vl53l5cx-uld) wrapper and
 `stm32f4xx-hal` 0.22.
