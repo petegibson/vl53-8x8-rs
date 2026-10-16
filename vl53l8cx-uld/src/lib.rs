@@ -508,6 +508,9 @@ where
 
 }
 
+#[cfg(test)]
+mod tests;
+
 /// Log data in 16-byte chunks when the `defmt` feature is enabled.
 #[cfg(feature = "defmt")]
 pub fn trace_data(data: &[u8]) {
