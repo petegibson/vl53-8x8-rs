@@ -1,0 +1,59 @@
+[package]
+name = "evo-f412re-uld"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Blocking VL53L5CX demo (ST's C ULD via vl53l5cx-uld) for a custom STM32F412RE board."
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = { version = "1", features = ["print-defmt"], optional = true }
+stm32f4xx-hal = { version = "0.22", features = ["stm32f412"] }
+embedded-hal = "1.0"
+vl53l5cx-uld = { path = "../../vl53l5cx-uld" }
+
+[dev-dependencies]
+embedded-test = { version = "0.7", features = ["defmt"] }
+
+[features]
+# panic-probe is the panic handler for the demo binary; embedded-test brings
+# its own, so it is optional and pulled in through `default` only.
+default = ["dep:panic-probe"]
+# Forward the wrapper's byte-level bus trace (DEFMT_LOG already enables it).
+defmt = ["vl53l5cx-uld/defmt"]
+defmt-bus-trace = ["defmt"]
+xtalk = ["vl53l5cx-uld/xtalk"]
+motion = ["vl53l5cx-uld/motion"]
+thresholds = ["vl53l5cx-uld/thresholds"]
+# Targets per zone; enable at most one. Tests index results with
+# `zone * NB_TARGET_PER_ZONE + target`.
+targets-2 = ["vl53l5cx-uld/targets-2"]
+targets-3 = ["vl53l5cx-uld/targets-3"]
+targets-4 = ["vl53l5cx-uld/targets-4"]
+
+[lib]
+test = false
+
+[[bin]]
+name = "evo-f412re-uld"
+path = "src/bin/basic_ranging.rs"
+test = false
+
+[[test]]
+name = "sensor"
+path = "tests/sensor.rs"
+harness = false
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"
+
+# Standalone root: this demo is excluded from the parent workspace.
+[workspace]

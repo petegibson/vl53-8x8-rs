@@ -19,6 +19,7 @@ nucleo_uld     := "examples/nucleo-f401re-uld"
 nucleo_embassy := "examples/nucleo-f401re-embassy"
 nucleo_rtic    := "examples/nucleo-f401re-rtic"
 evo            := "examples/evo-f412re-embassy"
+evo_uld        := "examples/evo-f412re-uld"
 rpi            := "examples/rpi-zero-2w"
 
 [private]
@@ -104,6 +105,18 @@ test-evo features="":
 report-evo-scene features="targets-2":
     cd {{evo}} && PROBE_RS_PROBE={{evo_probe}} cargo test --test sensor_async --release --features "{{features}}" -- --include-ignored multi_target_scene_report
 
+# The C-ULD recipes need a VL53L5CX fitted: vl53l5cx-uld cannot drive an L8.
+
+# Test: blocking vl53l5cx-uld (ST's L5 C ULD) suite (features e.g. `thresholds,xtalk`)
+[group('evo-f412re')]
+test-evo-uld features="":
+    cd {{evo_uld}} && PROBE_RS_PROBE={{evo_probe}} cargo test --test sensor --release --features "{{features}}"
+
+# Run: vl53l5cx-uld blocking demo for 25 s (init time, then one 4x4 grid per second)
+[group('evo-f412re')]
+run-evo-uld features="":
+    cd {{evo_uld}} && PROBE_RS_PROBE={{evo_probe}} timeout 25 cargo run --release --features "{{features}}" || true
+
 # ---------------------------------------------------------------------------
 # Raspberry Pi Zero 2W
 # ---------------------------------------------------------------------------
@@ -131,3 +144,6 @@ test-all-hw:
     just test-evo targets-2
     just test-evo targets-4
     just test-evo xtalk
+    just test-evo-uld
+    just test-evo-uld thresholds,xtalk,motion
+    just test-evo-uld targets-2

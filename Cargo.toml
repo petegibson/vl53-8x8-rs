@@ -15,6 +15,7 @@ exclude = [
     "examples/nucleo-f401re-embassy",
     "examples/nucleo-f401re-rtic",
     "examples/evo-f412re-embassy",
+    "examples/evo-f412re-uld",
     "examples/rpi-zero-2w",
 ]
 resolver = "2"

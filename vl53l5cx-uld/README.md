@@ -89,8 +89,13 @@ compiler. The repository's Nix flake sets this up.
 
 ## Hardware verification
 
-None yet through this wrapper; there is no VL53L5CX board wired for the C
-driver. The pure-Rust `vl53-8x8` driver is the hardware-tested VL53L5CX path.
+Verified on a custom STM32F412RE board with a VL53L5CX over I2C
+([`examples/evo-f412re-uld`](../examples/evo-f412re-uld): blocking
+`stm32f4xx-hal`, `tests/sensor.rs` ported from the L8 Nucleo suite). The demo
+ranges, and the on-target suite passes in its default configuration, with the
+`thresholds`, `xtalk` and `motion` plugins enabled, and with `targets-2`.
+Host-side, the differential tests replay recorded sensor responses through
+this wrapper and compare its bus traffic with the pure-Rust `vl53-8x8` driver.
 
 ## License
 

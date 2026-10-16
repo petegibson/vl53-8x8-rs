@@ -28,6 +28,7 @@ Two drivers share one set of types:
 | [`examples/nucleo-f401re-embassy/`](./examples/nucleo-f401re-embassy) | Demo: async (`vl53-8x8`, Embassy) on the same board.           |
 | [`examples/nucleo-f401re-rtic/`](./examples/nucleo-f401re-rtic) | Demo: `vl53-8x8` under RTIC 2 with the blocking `stm32f4xx-hal` via the `BlockingI2c` / `BlockingSpi` adapters, same board. |
 | [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy) | Demo: async (`vl53-8x8`, Embassy) on a custom STM32F412RE board, DMA I²C, L5 or L8, two sensors on one bus. |
+| [`examples/evo-f412re-uld/`](./examples/evo-f412re-uld) | Demo: blocking (`vl53l5cx-uld`, ST's VL53L5CX C ULD) on the same STM32F412RE board, I²C; VL53L5CX only. |
 | [`examples/rpi-zero-2w/`](./examples/rpi-zero-2w) | Demo: Linux on Raspberry Pi Zero 2W, both drivers, SPI via `linux-embedded-hal`. |
 
 `examples/` holds standalone board crates: each is its own cargo root with its
@@ -53,6 +54,11 @@ this repository:
 * **Bare-metal Cortex-M4, async DMA I²C** — custom STM32F412RE board with a
   VL53L8CX, pure-Rust `vl53-8x8` driver including the firmware upload path.
   See [`examples/evo-f412re-embassy/`](./examples/evo-f412re-embassy).
+  The same board with a VL53L5CX fitted also runs a blocking demo over ST's
+  L5 C ULD (`vl53l5cx-uld`, `stm32f4xx-hal`,
+  [`examples/evo-f412re-uld/`](./examples/evo-f412re-uld)); its on-target
+  suite passes with and without the plugin features and with two targets per
+  zone.
 * **Linux on Raspberry Pi Zero 2W** — Pololu VL53L8CX breakout over
   `/dev/spidev0.0` and `/dev/gpiochip0` via `linux-embedded-hal`, both
   blocking and async (Tokio current-thread). See
