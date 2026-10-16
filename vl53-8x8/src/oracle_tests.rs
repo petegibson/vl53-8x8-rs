@@ -11,6 +11,28 @@ use crate::consts;
 use crate::uld_data;
 use vl53l8cx_uld_sys as sys;
 
+/// Prints the driver's memory footprint for the active feature set. Not an
+/// assertion; run with `cargo test -p vl53-8x8 -- --ignored --nocapture print_footprint`
+/// (add `--features ...` to see the effect of plugins and `targets-N`).
+#[test]
+#[ignore = "informational: prints sizes"]
+fn print_footprint() {
+    use crate::firmware::FIRMWARE_LEN;
+    use crate::results::ResultsData;
+    use crate::state::State;
+    use core::mem::size_of;
+    let tables = uld_data::DEFAULT_CONFIGURATION.len()
+        + uld_data::DEFAULT_XTALK.len()
+        + uld_data::GET_NVM_CMD.len();
+    std::println!("flash: firmware image {FIRMWARE_LEN} B, data tables {tables} B");
+    std::println!(
+        "ram:   State (inside Sensor) {} B, ResultsData (one frame) {} B, targets/zone {}",
+        size_of::<State>(),
+        size_of::<ResultsData>(),
+        crate::NB_TARGET_PER_ZONE
+    );
+}
+
 // --- Data tables -------------------------------------------------------------
 
 #[test]

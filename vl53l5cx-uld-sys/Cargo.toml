@@ -4,16 +4,16 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
-description = "Raw FFI bindings (bindgen + cc) to the STMicroelectronics VL53L5CX Ultra Lite Driver (ULD) C sources. Unpublished; backs the vl53l5cx-uld wrapper and serves as a test oracle for the pure-Rust vl53-8x8 driver."
+description = "Raw FFI bindings (bindgen + cc) to the STMicroelectronics VL53L5CX Ultra Lite Driver (ULD) C sources."
+documentation = "https://docs.rs/vl53l5cx-uld-sys"
+repository = "https://github.com/petegibson/vl53-8x8-rs"
 readme = "README.md"
+keywords = ["vl53l5cx", "tof", "embedded-hal", "no-std", "uld"]
+categories = ["embedded", "no-std", "hardware-support"]
 links = "vl53l5cx_uld"
-# Not published (yet). The pure-Rust `vl53-8x8` driver covers the VL53L5CX for
-# users; this crate exists so its L5 firmware/config patches can be checked
-# byte-for-byte against ST's own L5 arrays, and so the `vl53l5cx-uld` wrapper
-# can drive ST's L5 C code in host-side differential tests. Path-only
-# dev-dependencies are stripped from published manifests. If `vl53l5cx-uld`
-# is ever published, publish this crate first and drop this line.
-publish = false
+
+[package.metadata.docs.rs]
+features = ["xtalk", "motion", "thresholds"]
 
 [dependencies]
 cty = "0.2"

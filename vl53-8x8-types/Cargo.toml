@@ -6,6 +6,7 @@ rust-version = "1.81"
 license = "BSD-3-Clause"
 description = "Shared types for the STMicroelectronics VL53L5CX and VL53L8CX 8x8 multizone Time-of-Flight sensor drivers (vl53-8x8, vl53l8cx-uld)."
 documentation = "https://docs.rs/vl53-8x8-types"
+repository = "https://github.com/petegibson/vl53-8x8-rs"
 readme = "README.md"
 keywords = ["vl53l5cx", "vl53l8cx", "tof", "embedded-hal", "no-std"]
 categories = ["embedded", "no-std", "hardware-support"]

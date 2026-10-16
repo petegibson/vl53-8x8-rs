@@ -5,15 +5,11 @@ edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
 description = "Blocking embedded-hal wrapper over STMicroelectronics' VL53L5CX Ultra Lite Driver (ULD) C library"
+documentation = "https://docs.rs/vl53l5cx-uld"
+repository = "https://github.com/petegibson/vl53-8x8-rs"
 readme = "README.md"
 keywords = ["vl53l5cx", "tof", "embedded-hal", "no-std", "uld"]
 categories = ["embedded", "no-std", "hardware-support"]
-# Not published (yet): it exists so host-side differential tests can drive
-# ST's VL53L5CX C code against a mock bus, with the same API as `vl53l8cx-uld`.
-# Users wanting a VL53L5CX driver should use the pure-Rust `vl53-8x8`. To
-# publish later, publish `vl53l5cx-uld-sys` first and drop both `publish`
-# lines.
-publish = false
 
 [package.metadata.docs.rs]
 features = ["xtalk", "motion", "thresholds"]

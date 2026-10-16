@@ -12,18 +12,18 @@ same method names, the same `Error` type from `vl53-8x8-types`, and the same
 `bind_platform_driver!` / `bind_platform_driver_spi!` macros (defining the
 `vl53l5cx_platform_*` symbols).
 
-**Not published.** Its purpose right now is to let host-side differential
-tests drive ST's L5 C code against a mock bus alongside the L8 one. If you
-want a VL53L5CX driver for an application, use the pure-Rust
-[`vl53-8x8`](../vl53-8x8) crate (async, no C toolchain, supports both parts).
-The crate is complete enough to publish later; to do so, publish
-`vl53l5cx-uld-sys` first and drop the `publish = false` lines.
+Use this crate when you want ST's reference implementation for the VL53L5CX
+behind an `embedded-hal` interface. If you want an async driver, or one
+without a C toolchain, or one that handles both parts, use the pure-Rust
+[`vl53-8x8`](../vl53-8x8) crate instead. The two are checked against each
+other: the repository's differential tests replay recorded sensor traffic to
+both and compare their register transcripts byte for byte.
 
 | Crate              | Role                                                       |
 | ------------------ | ---------------------------------------------------------- |
 | `vl53l5cx-uld`     | this crate: blocking safe wrapper, `Vl53l5cx`              |
 | `vl53l5cx-uld-sys` | bindgen + cc over ST's VL53L5CX ULD sources (needs libclang) |
-| `vl53l8cx-uld`     | the same wrapper for the VL53L8CX (published)              |
+| `vl53l8cx-uld`     | the same wrapper for the VL53L8CX                          |
 | `vl53-8x8`         | pure-Rust async driver for VL53L5CX **and** VL53L8CX, no C |
 | `vl53-8x8-types`   | shared enums and `Error`; re-exported here                 |
 

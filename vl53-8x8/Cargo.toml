@@ -6,6 +6,7 @@ rust-version = "1.81"
 license = "BSD-3-Clause"
 description = "Pure-Rust async embedded-hal driver for the STMicroelectronics VL53L5CX and VL53L8CX 8x8 multizone Time-of-Flight sensors (variant autodetect, no C toolchain)."
 documentation = "https://docs.rs/vl53-8x8"
+repository = "https://github.com/petegibson/vl53-8x8-rs"
 readme = "README.md"
 keywords = ["vl53l5cx", "vl53l8cx", "tof", "embedded-hal", "no-std"]
 categories = ["embedded", "no-std", "hardware-support"]
@@ -24,7 +25,7 @@ defmt = { version = "1", optional = true }
 # into the driver, so downstream builds need no libclang. Built with its default
 # features; layout tests therefore run only under this crate's default features.
 vl53l8cx-uld-sys = { path = "../vl53l8cx-uld-sys", version = "0.1.0" }
-# VL53L5CX oracle: ST's L5 ULD, compiled the same way. Unpublished and path-only
+# VL53L5CX oracle: ST's L5 ULD, compiled the same way. Path-only dev-dependency
 # (Cargo strips path-only dev-dependencies from the published manifest). Lets
 # the tests check the L5 firmware/config patches against ST's real L5 arrays.
 vl53l5cx-uld-sys = { path = "../vl53l5cx-uld-sys" }
