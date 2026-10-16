@@ -222,37 +222,40 @@ own directory.
 ## Architecture
 
 ```mermaid
-graph TD;
-    UserApp[Application code]
+flowchart TD
+    UserApp["Application code"]
 
-    subgraph "vl53-8x8 (async, pure Rust)"
-        AsyncApi["Sensor&lt;Bus, Delay, ...&gt;<br/>detect variant, patch + upload firmware"]
-        Tables["ST firmware image + data tables<br/>(generated from the ULD headers)"]
+    subgraph async8x8["vl53-8x8 (async, pure Rust)"]
+        AsyncApi["Sensor: detect variant, patch and upload firmware"]
+        Tables["ST firmware image and data tables, generated from the ULD headers"]
     end
 
-    subgraph "vl53l8cx-uld / vl53l5cx-uld (blocking)"
-        BlockingApi["Vl53l8cx / Vl53l5cx&lt;Bus, Delay, ...&gt;"]
-        PlatformShim["Platform shim<br/>bind_platform_driver!"]
+    subgraph uld["vl53l8cx-uld and vl53l5cx-uld (blocking)"]
+        BlockingApi["Vl53l8cx or Vl53l5cx"]
+        PlatformShim["Platform shim: bind_platform_driver macro"]
     end
 
-    subgraph "vl53l8cx-uld-sys / vl53l5cx-uld-sys"
-        Bindings["bindgen bindings + safe wrappers"]
-        ULD["ST ULD C code + firmware<br/>(cc, needs libclang)"]
+    subgraph uldsys["vl53l8cx-uld-sys and vl53l5cx-uld-sys"]
+        Bindings["bindgen bindings and safe wrappers"]
+        ULD["ST ULD C code and firmware (cc, needs libclang)"]
     end
 
-    Types["vl53-8x8-types<br/>Error, Resolution, plugin types"]
+    Types["vl53-8x8-types: Error, Resolution, plugin types"]
+    HAL["embedded-hal traits: I2c, SpiDevice, DelayNs, Wait"]
+    Hardware["VL53L5CX or VL53L8CX"]
 
     UserApp --> AsyncApi
     UserApp --> BlockingApi
     AsyncApi --> Tables
     AsyncApi --> Types
-    BlockingApi --> Bindings --> ULD
-    ULD -- "I/O + delay callbacks" --> PlatformShim
+    BlockingApi --> Bindings
+    Bindings --> ULD
+    ULD -->|I/O and delay callbacks| PlatformShim
     Bindings --> Types
-    AsyncApi -- "embedded-hal-async" --> HAL["embedded-hal traits<br/>I2c / SpiDevice / DelayNs / Wait"]
-    PlatformShim -- "embedded-hal" --> HAL
-    HAL --> Hardware["VL53L5CX / VL53L8CX"]
-    Bindings -. "dev-dependency: test oracle" .-> AsyncApi
+    AsyncApi -->|embedded-hal-async| HAL
+    PlatformShim -->|embedded-hal| HAL
+    HAL --> Hardware
+    Bindings -.->|dev-dependency: test oracle| AsyncApi
 ```
 
 * **Platform-agnostic via embedded-hal.** Both drivers take any type
