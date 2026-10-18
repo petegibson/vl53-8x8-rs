@@ -507,7 +507,7 @@ mod layout {
 //
 // `vl53-8x8` derives the VL53L5CX firmware image and default configuration from
 // the VL53L8CX ones by applying small byte patches. `vl53l5cx-uld-sys` (an
-// unpublished, path-only dev-dependency) compiles ST's actual VL53L5CX ULD, so
+// path-only dev-dependency) compiles ST's actual VL53L5CX ULD, so
 // these tests pin the patches to ST's arrays byte for byte and confirm that the
 // register map and the remaining data tables really are shared between the parts.
 

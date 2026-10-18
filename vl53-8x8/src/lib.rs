@@ -18,8 +18,9 @@ Crate family:
 - `vl53-8x8-types`: shared enums, `Error` and result types; no dependencies.
   Re-exported here so dependants need only this crate.
 - `vl53-8x8` (this crate): the pure-Rust L5CX/L8CX driver.
-- `vl53l8cx-uld-sys`: bindgen + cc over ST's L8CX ULD C sources.
-- `vl53l8cx-uld`: safe blocking wrapper over that ULD.
+- `vl53l8cx-uld-sys` / `vl53l5cx-uld-sys`: bindgen + cc over ST's L8CX and
+  L5CX ULD C sources.
+- `vl53l8cx-uld` / `vl53l5cx-uld`: safe blocking wrappers over those ULDs.
 
 What comes from where:
 
@@ -37,8 +38,9 @@ What comes from where:
 - [`ResultsData`] is a `#[repr(C)]` rendering of the ULD's result struct
   with the same feature gating.
 
-`vl53l8cx-uld-sys` is a dev-dependency only, used by the oracle tests to check
-the constants, tables and layouts above against the C build.
+`vl53l8cx-uld-sys` and `vl53l5cx-uld-sys` are dev-dependencies only, used by
+the oracle tests to check the constants, tables, patches and layouts above
+against ST's C builds for both parts.
 */
 
 pub mod bus;

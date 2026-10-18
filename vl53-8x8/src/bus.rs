@@ -75,9 +75,12 @@ impl<T: I2c> VlBusAsync for T {
 
 /// Wrapper that implements `VlBusAsync` using blocking `embedded_hal::i2c::I2c`.
 ///
-/// Useful on platforms where the async I2C DMA driver is unreliable
-/// (e.g. STM32F4/F1/F2/L1 with I2C v1). I2C transfers will block the
-/// executor, but async delays in the driver still yield correctly.
+/// Use it where no async I2C implementation is available or wanted: blocking
+/// HALs such as `stm32f4xx-hal`, RTIC 2 applications (the monotonic provides
+/// the async `DelayNs`), or any executor-less `block_on` setup. I2C transfers
+/// block the executor, but the driver's async delays still yield correctly.
+/// It speaks exactly the same wire protocol as the async path, so it is also
+/// a handy A/B tool when debugging a HAL's async I2C driver.
 ///
 /// On embassy-stm32, the async `I2c` peripheral also implements the blocking
 /// trait, so you can wrap it directly:

@@ -97,8 +97,10 @@ the sensor); ambient only requires some zone to be non-zero.
 
 ## Status
 
-Builds (demo, test suite and all feature combinations); **hardware run
-pending**.
+Hardware-verified on the board with a VL53L5CX fitted: the demo ranges
+(firmware upload about 1.2 s), and the on-target suite passes in its default
+configuration (17 tests), with `thresholds,xtalk,motion` (24) and with
+`targets-2` (17).
 
 ## Features
 

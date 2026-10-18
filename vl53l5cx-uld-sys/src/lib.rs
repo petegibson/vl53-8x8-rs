@@ -11,13 +11,13 @@
 //! required. The safe blocking wrapper is `vl53l5cx-uld`; shared types live in
 //! `vl53-8x8-types` and are re-exported here.
 //!
-//! This crate is **not published** (yet). It serves two purposes: it is the
-//! FFI layer under the `vl53l5cx-uld` wrapper (used for host-side differential
-//! tests of ST's L5 C code against a mock bus), and it is a test oracle for the
-//! pure-Rust `vl53-8x8` driver, which derives its VL53L5CX firmware and default
-//! configuration from the VL53L8CX ones by applying small byte patches. The
-//! tests in `vl53-8x8` compare those patched images against the arrays
-//! exported here.
+//! This crate serves two purposes: it is the FFI layer under the `vl53l5cx-uld`
+//! wrapper, and it is a test oracle for the pure-Rust `vl53-8x8` driver, which
+//! derives its VL53L5CX firmware and default configuration from the VL53L8CX
+//! ones by applying small byte patches. The tests in `vl53-8x8` compare those
+//! patched images against the arrays exported here, and the repository's
+//! differential tests replay recorded sensor traffic through both this C code
+//! and the Rust driver to compare their bus transcripts.
 //!
 //! Differences from `vl53l8cx-uld-sys` that follow from the ULD headers: the
 //! VL53L5CX ULD has no deep-sleep power mode, no external sync pin and no

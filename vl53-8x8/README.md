@@ -58,7 +58,7 @@ loop {
 ```
 
 - A blocking `embedded_hal::i2c::I2c` can be used through the `BlockingI2c`
-  wrapper (useful where the HAL's async I2C is unreliable), and a blocking
+  wrapper (for HALs that only offer blocking I2C), and a blocking
   `embedded_hal::spi::SpiDevice` through `BlockingSpi`. Both speak the same
   wire protocol as the async paths; only the transfers block, the driver's
   delays still yield. This is how the driver runs on a blocking HAL without

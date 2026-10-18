@@ -10,7 +10,7 @@
 //! * [`mock`]: a mock bus implementing blocking `SpiDevice` and `I2c`, a
 //!   counting no-op delay and no-op pins. Every transfer is recorded as an
 //!   [`Op`], the same shape as the JSON.
-//! * [`compare`]: normalisation (collapse runs of identical reads) and a diff
+//! * [`mod@compare`]: normalisation (collapse runs of identical reads) and a diff
 //!   that points at the first differing op with context.
 //! * [`driver`]: the `Driver` trait all drivers are driven through, the
 //!   `vl53-8x8` adapter (driven with a minimal `block_on`, over the blocking
