@@ -61,9 +61,12 @@ loop {
   wrapper (for HALs that only offer blocking I2C), and a blocking
   `embedded_hal::spi::SpiDevice` through `BlockingSpi`. Both speak the same
   wire protocol as the async paths; only the transfers block, the driver's
-  delays still yield. This is how the driver runs on a blocking HAL without
-  an async executor, e.g. `stm32f4xx-hal` under RTIC 2 with the SysTick
-  monotonic as the `DelayNs` (`examples/nucleo-f401re-rtic`).
+  delays still yield. Whether you need them depends on the HAL, not the
+  executor: `stm32f4xx-hal` implements only the blocking traits, so it needs
+  the adapters under RTIC 2, Embassy or a bare `block_on` alike
+  (`examples/nucleo-f401re-rtic` uses them with the SysTick monotonic as the
+  `DelayNs`), while `embassy-stm32` offers async I2C and SPI that work
+  directly under any of those executors.
 - `with_address` + `redetect` re-attach a handle to a sensor already moved
   with `set_i2c_address`, without re-uploading firmware; see the
   `examples/evo-f412re-embassy` demo for two sensors on one bus.

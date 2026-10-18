@@ -75,10 +75,13 @@ impl<T: I2c> VlBusAsync for T {
 
 /// Wrapper that implements `VlBusAsync` using blocking `embedded_hal::i2c::I2c`.
 ///
-/// Use it where no async I2C implementation is available or wanted: blocking
-/// HALs such as `stm32f4xx-hal`, RTIC 2 applications (the monotonic provides
-/// the async `DelayNs`), or any executor-less `block_on` setup. I2C transfers
-/// block the executor, but the driver's async delays still yield correctly.
+/// Use it where the HAL offers no async I2C, whichever executor runs the
+/// driver: `stm32f4xx-hal` and most other non-Embassy HALs implement only the
+/// blocking traits, so they need this adapter under RTIC 2 (whose monotonic
+/// provides the async `DelayNs`), under Embassy, or with a bare `block_on`.
+/// HALs with async I2C, such as `embassy-stm32`, can be used directly under
+/// any of those executors. I2C transfers block the executor, but the driver's
+/// async delays still yield correctly.
 /// It speaks exactly the same wire protocol as the async path, so it is also
 /// a handy A/B tool when debugging a HAL's async I2C driver.
 ///
@@ -182,9 +185,9 @@ impl<SPI: SpiDevice> VlBusAsync for Spi<SPI> {
 /// executor; the driver's async delays still yield correctly, so other tasks
 /// run between transfers.
 ///
-/// Use it where no async SPI implementation is available or wanted: blocking
-/// HALs such as `stm32f4xx-hal`, RTIC 2 applications (the monotonic provides
-/// the async `DelayNs`), or any executor-less `block_on` setup. Chip-select
+/// Use it where the HAL offers no async SPI, whichever executor runs the
+/// driver (`stm32f4xx-hal` under RTIC 2, with the monotonic as the async
+/// `DelayNs`, is the shipped example; a bare `block_on` works too). Chip-select
 /// handling comes from the `SpiDevice`, e.g. `embedded_hal_bus::spi::ExclusiveDevice`:
 /// ```ignore
 /// let dev = embedded_hal_bus::spi::ExclusiveDevice::new_no_delay(spi, cs).unwrap();

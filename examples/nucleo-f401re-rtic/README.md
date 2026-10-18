@@ -12,6 +12,9 @@ shield (VL53L8CX, centre socket).
   but every delay inside the driver is an `await` on the SysTick monotonic
   (`rtic_monotonics::systick_monotonic!(Mono, 1000)`, which implements
   `embedded_hal_async::delay::DelayNs`), so the RTIC executor keeps scheduling.
+  The adapters are a property of the HAL, not of RTIC: `embassy-stm32` can be
+  used as the HAL under RTIC 2 too, and its async I2C/SPI then drive the
+  sensor directly with DMA, exactly as in `../nucleo-f401re-embassy`.
 - Two software tasks: `ranging` (priority 1) resets and initialises the
   sensor, logs the detected variant and the firmware-upload time, then ranges
   4x4 at 10 Hz and prints one grid of first-target distances per second; a
