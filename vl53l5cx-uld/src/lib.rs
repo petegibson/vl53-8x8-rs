@@ -178,6 +178,12 @@ where
 }
 
 impl<BUS, D, RST, INT> Vl53l5cx<BUS, D, RST, INT> {
+    /// Attach the sensor's **LPn** pin, or any reset line where low means reset.
+    ///
+    /// LPn is the part's own low-power / reset input and is active low: holding it
+    /// low keeps the sensor in reset, high lets it run. [`reset`](Self::reset)
+    /// pulses it low for 10 ms. With several sensors on one bus, LPn is also how
+    /// the others are kept quiet while one sensor's I2C address is changed.
     pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Vl53l5cx<BUS, D, RstNew, INT> {
         Vl53l5cx {
             comms: self.comms,
@@ -190,6 +196,13 @@ impl<BUS, D, RST, INT> Vl53l5cx<BUS, D, RST, INT> {
         }
     }
 
+    /// Attach a reset line where **high** means reset.
+    ///
+    /// The sensor's LPn pin itself is active low; use this variant when the
+    /// signal is inverted on its way to the sensor (level shifter, transistor),
+    /// or when the board's reset line is the sensor's I2C_RST input, which is
+    /// active high. Either way [`reset`](Self::reset) drives the pin high for
+    /// 10 ms and then releases it.
     pub fn with_reset_pin_active_high<RstNew>(self, reset_pin: RstNew) -> Vl53l5cx<BUS, D, RstNew, INT> {
         Vl53l5cx {
             comms: self.comms,
@@ -202,6 +215,9 @@ impl<BUS, D, RST, INT> Vl53l5cx<BUS, D, RST, INT> {
         }
     }
 
+    /// Attach the sensor's INT (data-ready) pin, which goes **low** when a frame
+    /// is ready. This is the part's default: INT is an open-drain output pulled
+    /// low for the interrupt pulse.
     pub fn with_interrupt_pin_active_low<IntNew>(self, int_pin: IntNew) -> Vl53l5cx<BUS, D, RST, IntNew> {
         Vl53l5cx {
             comms: self.comms,
@@ -214,6 +230,8 @@ impl<BUS, D, RST, INT> Vl53l5cx<BUS, D, RST, INT> {
         }
     }
 
+    /// Attach a data-ready line that goes **high** when a frame is ready, for
+    /// boards that invert the sensor's INT output.
     pub fn with_interrupt_pin_active_high<IntNew>(self, int_pin: IntNew) -> Vl53l5cx<BUS, D, RST, IntNew> {
         Vl53l5cx {
             comms: self.comms,
@@ -244,6 +262,12 @@ where
         result.map_err(|_| Error::Pin)
     }
 
+    /// Pulse the configured reset pin: assert for 10 ms, then release.
+    ///
+    /// The polarity comes from [`with_reset_pin_active_low`](Self::with_reset_pin_active_low)
+    /// or [`with_reset_pin_active_high`](Self::with_reset_pin_active_high). ST's
+    /// ULD has no equivalent; it leaves LPn and power to the application. A reset
+    /// discards the uploaded firmware, so call [`init`](Self::init) afterwards.
     pub fn reset(&mut self) -> Result<(), Error<E>> {
         self.set_reset_state(true)?;
         self.comms.delay.delay_ms(10);
