@@ -104,90 +104,148 @@ pub const VL53L8CX_GET_XTALK_CMD: [u8; 72] = [
 /// A placeholder type for an unconfigured hardware pin.
 pub struct NoPin;
 
-/// Zone grid resolution.
+/// Zone grid resolution. Default after `init()` is [`Resolution::Res4x4`].
+/// Set it before the ranging frequency, whose allowed range depends on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Resolution {
+    /// 16 zones; ranging frequency 1..=60 Hz. The default.
     Res4x4 = VL53L8CX_RESOLUTION_4X4,
+    /// 64 zones; ranging frequency 1..=15 Hz; four times the bus traffic per
+    /// frame.
     Res8x8 = VL53L8CX_RESOLUTION_8X8,
 }
 
-/// Order in which detected targets within a zone are reported.
+/// Order in which detected targets within a zone are reported. Default after
+/// `init()` is [`TargetOrder::Strongest`]. With one target per zone this picks
+/// the target reported; two targets in one zone are only told apart when at
+/// least 600 mm apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TargetOrder {
+    /// Nearest target first.
     Closest = VL53L8CX_TARGET_ORDER_CLOSEST,
+    /// Target with the strongest return signal first. The default.
     Strongest = VL53L8CX_TARGET_ORDER_STRONGEST,
 }
 
-/// Ranging mode.
+/// Ranging mode. Default after `init()` is [`RangingMode::Autonomous`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RangingMode {
+    /// VCSEL on throughout the frame: best range and ambient immunity, for
+    /// fast or high-performance ranging; the integration time is ignored.
     Continuous = VL53L8CX_RANGING_MODE_CONTINUOUS,
+    /// VCSEL on only for the integration time of each frame: lower power, the
+    /// more so at low ranging frequency. The default.
     Autonomous = VL53L8CX_RANGING_MODE_AUTONOMOUS,
 }
 
-/// Sensor power mode.
+/// Sensor power mode. Default after `init()` is [`PowerMode::Wakeup`]. Change
+/// it only while not ranging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PowerMode {
+    /// LP idle: retains firmware and configuration but cannot range until
+    /// woken with [`PowerMode::Wakeup`].
     Sleep = VL53L8CX_POWER_MODE_SLEEP,
+    /// HP idle: ready to range. The default.
     Wakeup = VL53L8CX_POWER_MODE_WAKEUP,
+    /// VL53L8CX only, lower than sleep: waking re-uploads the firmware and
+    /// returns the configuration to the `init()` defaults. Rejected with
+    /// `FirmwareError::InvalidParam` on a VL53L5CX.
     DeepSleep = VL53L8CX_POWER_MODE_DEEP_SLEEP,
 }
 
-/// Measurement a detection threshold is evaluated against.
+/// Measurement a detection threshold is evaluated against. Thresholds are
+/// given in the natural units listed here; the API converts them to the
+/// firmware's fixed-point format.
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ThresholdMeasurement {
+    /// Target distance, mm.
     DistanceMm = VL53L8CX_DISTANCE_MM,
+    /// Return signal rate, kcps/SPAD.
     SignalPerSpadKcps = VL53L8CX_SIGNAL_PER_SPAD_KCPS,
+    /// Standard deviation of the distance, mm.
     RangeSigmaMm = VL53L8CX_RANGE_SIGMA_MM,
+    /// Ambient light rate, kcps/SPAD.
     AmbientPerSpadKcps = VL53L8CX_AMBIENT_PER_SPAD_KCPS,
+    /// Number of targets detected in the zone.
     NbTargetDetected = VL53L8CX_NB_TARGET_DETECTED,
+    /// Target status code (5 and 9 are valid ranges).
     TargetStatus = VL53L8CX_TARGET_STATUS,
+    /// Number of SPADs enabled in the zone.
     NbSpadsEnabled = VL53L8CX_NB_SPADS_ENABLED,
+    /// Motion indicator of the zone's aggregate (`motion` plugin).
     MotionIndicator = VL53L8CX_MOTION_INDICATOR,
 }
 
-/// Comparison applied by a detection threshold.
+/// Comparison applied by a detection threshold, between the measured value
+/// and the entry's `low_threshold` / `high_threshold`.
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ThresholdType {
+    /// Trigger when `low <= value <= high`.
     InWindow = VL53L8CX_IN_WINDOW,
+    /// Trigger when the value is outside `low..=high`.
     OutOfWindow = VL53L8CX_OUT_OF_WINDOW,
+    /// Trigger when `value <= low`.
     LessThanEqualMin = VL53L8CX_LESS_THAN_EQUAL_MIN_CHECKER,
+    /// Trigger when `value > high`.
     GreaterThanMax = VL53L8CX_GREATER_THAN_MAX_CHECKER,
+    /// Trigger when `value == low`.
     EqualMin = VL53L8CX_EQUAL_MIN_CHECKER,
+    /// Trigger when `value != low`.
     NotEqualMin = VL53L8CX_NOT_EQUAL_MIN_CHECKER,
 }
 
 /// Logical operation combining a threshold with the next one in the list.
+/// Only used by the 4x4 two-thresholds-per-zone configuration; ST's header
+/// notes that the first threshold of a pair is always OR, and defines OR as
+/// 0, the same value as [`ThresholdOperation::None`].
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ThresholdOperation {
+    /// No combination (also the ULD's `OR` value, 0).
     None = VL53L8CX_OPERATION_NONE,
     // Or: ULD defines VL53L8CX_OPERATION_OR as 0, same as NONE.
     // Awaiting clarification from ST on whether OR should be a distinct value.
     // Or = VL53L8CX_OPERATION_OR,
+    /// Both this and the next threshold must be met.
     And = VL53L8CX_OPERATION_AND,
 }
 
 /// One detection threshold entry.
 /// Layout matches the C struct `VL53L8CX_DetectionThresholds`.
+///
+/// `set_detection_thresholds` takes 64 of these. Three configurations are
+/// supported: 4x4 with one threshold per zone (16 entries used), 4x4 with
+/// two per zone (32 entries; `mathematic_operation` combines each pair), or
+/// 8x8 with one per zone (64 entries). ST's header says to OR
+/// [`VL53L8CX_LAST_THRESHOLD`] (128) into the `zone_num` of the last entry
+/// used and to leave the rest zero.
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct DetectionThreshold {
+    /// Lower bound, in the natural units of `measurement` (mm, kcps/SPAD,
+    /// count, ...); the API converts to the firmware's fixed-point format.
     pub low_threshold: i32,
+    /// Upper bound, same units as `low_threshold`.
     pub high_threshold: i32,
+    /// Which result value is compared.
     pub measurement: ThresholdMeasurement,
+    /// How the value is compared with the bounds.
     pub threshold_type: ThresholdType,
+    /// Zone this entry applies to (0..16 in 4x4, 0..64 in 8x8); OR in
+    /// [`VL53L8CX_LAST_THRESHOLD`] on the last entry used.
     pub zone_num: u8,
+    /// Combination with the next entry; only applies to the 4x4
+    /// two-per-zone configuration.
     pub mathematic_operation: ThresholdOperation,
 }
 

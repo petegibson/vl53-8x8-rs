@@ -127,6 +127,11 @@ where
     BUS: I2c,
     D: DelayNs,
 {
+    /// Create a driver over an `embedded-hal` I2C bus at [`DEFAULT_ADDRESS`]
+    /// (0x29), with no LPn or INT pin attached. Nothing is sent to the sensor
+    /// until [`Vl53l5cx::init`]. Attach pins with the `with_*_pin_*` builders. The
+    /// program must also invoke [`bind_platform_driver!`] once with the same
+    /// bus and delay types so the ULD can call back into Rust.
     pub fn new(i2c: BUS, delay: D) -> Self {
         Self {
             comms: Vl53l5cxComms { bus: i2c, delay },
@@ -145,6 +150,11 @@ where
     SPI: SpiDevice,
     D: DelayNs,
 {
+    /// Create a driver over an `embedded-hal` `SpiDevice`, for API parity
+    /// with `vl53l8cx-uld`; the VL53L5CX itself is an I2C-only part.
+    /// Otherwise as [`Vl53l5cx::new`]: no pins attached, nothing sent until
+    /// [`Vl53l5cx::init`]; the program must invoke [`bind_platform_driver_spi!`]
+    /// once with the same SPI and delay types.
     pub fn new_spi(spi: SPI, delay: D) -> Self {
         Self {
             comms: Vl53l5cxComms { bus: Vl53l5cxSpiDevice { spi }, delay },
@@ -164,6 +174,11 @@ where
     INT: InputPin,
     <INT as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
+    /// Busy-wait on the INT pin until it shows data ready (the level set by
+    /// the `with_interrupt_pin_*` builder), then return; follow with
+    /// [`Vl53l5cx::get_ranging_data`]. Spins without delay and without bus
+    /// traffic. The alternative without an INT pin is polling
+    /// [`Vl53l5cx::check_data_ready`].
     pub fn wait_for_data_ready_blocking(&mut self) -> Result<(), Error<E>> {
         loop {
             let is_high_result = self.int_pin.is_high().map_err(|_| Error::Pin)?;
@@ -290,6 +305,13 @@ where
         Ok(())
     }
 
+    /// Move the sensor to `new_address` (7-bit) and use it for all further
+    /// traffic. With several sensors on one bus, hold every other sensor's LPn
+    /// low while calling this so only the target sensor hears the command, then
+    /// release them ([`Vl53l5cx::with_reset_pin_active_low`]). It is a register
+    /// write, not a firmware command, so it works before [`Vl53l5cx::init`] as in
+    /// ST's multi-sensor example. The address is not retained: a power cycle
+    /// returns the sensor to [`DEFAULT_ADDRESS`]. The value is not validated.
     pub fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<E>> {
         self.bind_platform();
         let i2c_address_8bit = (new_address as u16) << 1;
@@ -315,6 +337,11 @@ where
         self.stdev.platform.address = (self.address as u16) << 1;
     }
 
+    /// Start a ranging session with the current configuration. Settings cannot
+    /// be changed while ranging: set resolution, frequency, mode, integration
+    /// time, sharpener, target order, thresholds and motion first, then start,
+    /// then loop on [`Vl53l5cx::check_data_ready`] (or the INT pin) and
+    /// [`Vl53l5cx::get_ranging_data`], and finish with [`Vl53l5cx::stop_ranging`].
     pub fn start_ranging(&mut self) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::start_ranging(&mut self.stdev);
@@ -324,6 +351,10 @@ where
         }
     }
 
+    /// Stop the session started by [`Vl53l5cx::start_ranging`]. Required before
+    /// changing settings or the power mode. Afterwards the sensor is
+    /// idle in its current power mode, keeps its configuration and can be
+    /// reconfigured and restarted.
     pub fn stop_ranging(&mut self) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::stop_ranging(&mut self.stdev);
@@ -333,6 +364,13 @@ where
         }
     }
 
+    /// Poll the sensor over the bus for a new frame: `Ok(true)` once per frame,
+    /// when it is ready to be read with [`Vl53l5cx::get_ranging_data`]. Polling
+    /// pattern without an INT pin: call this in a loop with a short delay (a few
+    /// ms) until it returns `true`, read the frame, repeat. With INT wired
+    /// use [`Vl53l5cx::wait_for_data_ready_blocking`] instead. A
+    /// firmware error flagged in the status bytes is returned as
+    /// `Error::Firmware`.
     pub fn check_data_ready(&mut self) -> Result<bool, Error<E>> {
         self.bind_platform();
         let (status, is_ready) = sys::wrappers::check_data_ready(&mut self.stdev);
@@ -342,6 +380,13 @@ where
         }
     }
 
+    /// Set the zone grid: [`Resolution::Res4x4`] (16 zones; default after
+    /// [`Vl53l5cx::init`]) or [`Resolution::Res8x8`] (64 zones, four times the bus
+    /// traffic per frame). The allowed ranging frequency depends on it, so
+    /// call this **before** [`Vl53l5cx::set_ranging_frequency_hz`]; with the
+    /// motion indicator, follow with [`Vl53l5cx::motion_indicator_set_resolution`].
+    /// The ULD also re-sends the resolution-dependent offset and crosstalk
+    /// calibration data. Not while ranging.
     pub fn set_resolution(&mut self, resolution: Resolution) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_resolution(&mut self.stdev, resolution as u8);
@@ -351,6 +396,13 @@ where
         }
     }
 
+    /// Set the ranging frequency in Hz (frames per second): 1..=60 Hz in 4x4,
+    /// 1..=15 Hz in 8x8; default 1 Hz after [`Vl53l5cx::init`]. The limits depend on
+    /// the resolution, so call [`Vl53l5cx::set_resolution`] first. Neither this
+    /// driver nor ST's ULD checks the value: the firmware enforces the limits.
+    /// In [`RangingMode::Autonomous`] the frame period must also exceed the
+    /// integration time(s) plus 1 ms, see [`Vl53l5cx::set_integration_time_ms`].
+    /// Not while ranging.
     pub fn set_ranging_frequency_hz(&mut self, frequency_hz: u8) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_ranging_frequency_hz(&mut self.stdev, frequency_hz);
@@ -360,6 +412,13 @@ where
         }
     }
 
+    /// Set the ranging mode. [`RangingMode::Autonomous`] (default after
+    /// [`Vl53l5cx::init`]) fires the VCSEL only for the integration time of each
+    /// frame: lower power, the more so at low frequency; the first frame's
+    /// period may be shorter than configured. [`RangingMode::Continuous`] keeps
+    /// the VCSEL on throughout: best range and ambient immunity, for fast or
+    /// high-performance ranging; the integration time is ignored. Not while
+    /// ranging.
     pub fn set_ranging_mode(&mut self, mode: RangingMode) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_ranging_mode(&mut self.stdev, mode as u8);
@@ -369,6 +428,13 @@ where
         }
     }
 
+    /// Set the integration time in ms, 2..=1000; anything else the ULD returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// Default 5 ms after [`Vl53l5cx::init`]. Only meaningful in
+    /// [`RangingMode::Autonomous`] (no effect in continuous mode). 4x4
+    /// integrates once per frame, 8x8 four times; the sum of the integrations
+    /// plus 1 ms of overhead must fit in the frame period (1 / frequency),
+    /// otherwise the sensor lengthens the period by itself. Not while ranging.
     pub fn set_integration_time_ms(&mut self, time_ms: u32) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_integration_time_ms(&mut self.stdev, time_ms);
@@ -378,6 +444,12 @@ where
         }
     }
 
+    /// Set the sharpener in percent, 0..=99; 100 or more the ULD returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// Default 14 % after [`Vl53l5cx::init`]. The sharpener removes veiling-glare
+    /// signal spilling from a close target into neighbouring zones; a higher
+    /// value trims more of that spread, 0 disables it. Stored in 1/255 steps, so
+    /// the readback can be 1 % below the value set. Not while ranging.
     pub fn set_sharpener_percent(&mut self, percent: u8) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_sharpener_percent(&mut self.stdev, percent);
@@ -387,6 +459,12 @@ where
         }
     }
 
+    /// Choose which detected target a zone reports first: [`TargetOrder::Closest`]
+    /// or [`TargetOrder::Strongest`] (default after [`Vl53l5cx::init`]). With the
+    /// default single target per zone this selects the one target reported;
+    /// with a `targets-N` feature it orders the list ([`NB_TARGET_PER_ZONE`]).
+    /// Two targets in one zone are only told apart when at least 600 mm apart.
+    /// Not while ranging.
     pub fn set_target_order(&mut self, order: TargetOrder) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_target_order(&mut self.stdev, order as u8);
@@ -403,6 +481,11 @@ where
     /// `VL53L5CX_POWER_MODE_DEEP_SLEEP`); passing [`PowerMode::DeepSleep`]
     /// returns `Error::Firmware(FirmwareError::InvalidParam)` without touching
     /// the bus, matching what the L8 ULD itself returns for an unknown mode.
+    ///
+    /// Stop ranging first ([`Vl53l5cx::stop_ranging`]). Default after
+    /// [`Vl53l5cx::init`] is [`PowerMode::Wakeup`] (HP idle, ready to range);
+    /// [`PowerMode::Sleep`] (LP idle) keeps firmware and configuration but
+    /// cannot range until woken.
     pub fn set_power_mode(&mut self, mode: PowerMode) -> Result<(), Error<E>> {
         if mode == PowerMode::DeepSleep {
             return Err(Error::Firmware(sys::VL53L5CX_STATUS_INVALID_PARAM.into()));
@@ -415,6 +498,8 @@ where
         }
     }
 
+    /// Read the current zone grid. Default after [`Vl53l5cx::init`] is
+    /// [`Resolution::Res4x4`].
     pub fn get_resolution(&mut self) -> Result<Resolution, Error<E>> {
         self.bind_platform();
         let mut resolution: u8 = 0;
@@ -431,6 +516,7 @@ where
         }
     }
 
+    /// Read the ranging frequency in Hz. Default after [`Vl53l5cx::init`] is 1 Hz.
     pub fn get_ranging_frequency_hz(&mut self) -> Result<u8, Error<E>> {
         self.bind_platform();
         let mut freq: u8 = 0;
@@ -441,6 +527,7 @@ where
         }
     }
 
+    /// Read the integration time in ms. Default after [`Vl53l5cx::init`] is 5 ms.
     pub fn get_integration_time_ms(&mut self) -> Result<u32, Error<E>> {
         self.bind_platform();
         let (status, time) = sys::wrappers::get_integration_time_ms(&mut self.stdev);
@@ -450,6 +537,8 @@ where
         }
     }
 
+    /// Read the ranging mode. Default after [`Vl53l5cx::init`] is
+    /// [`RangingMode::Autonomous`].
     pub fn get_ranging_mode(&mut self) -> Result<RangingMode, Error<E>> {
         self.bind_platform();
         let (status, mode) = sys::wrappers::get_ranging_mode(&mut self.stdev);
@@ -465,6 +554,8 @@ where
         }
     }
 
+    /// Read the sharpener in percent. Default after [`Vl53l5cx::init`] is 14 %; the
+    /// value is stored in 1/255 steps, so it can read 1 % below what was set.
     pub fn get_sharpener_percent(&mut self) -> Result<u8, Error<E>> {
         self.bind_platform();
         let (status, percent) = sys::wrappers::get_sharpener_percent(&mut self.stdev);
@@ -474,6 +565,8 @@ where
         }
     }
 
+    /// Read the target order. Default after [`Vl53l5cx::init`] is
+    /// [`TargetOrder::Strongest`].
     pub fn get_target_order(&mut self) -> Result<TargetOrder, Error<E>> {
         self.bind_platform();
         let (status, order) = sys::wrappers::get_target_order(&mut self.stdev);
@@ -489,6 +582,8 @@ where
         }
     }
 
+    /// Read the power mode. Default after [`Vl53l5cx::init`] is
+    /// [`PowerMode::Wakeup`]. Never [`PowerMode::DeepSleep`] on this part.
     pub fn get_power_mode(&mut self) -> Result<PowerMode, Error<E>> {
         self.bind_platform();
         let (status, mode) = sys::wrappers::get_power_mode(&mut self.stdev);
@@ -505,6 +600,9 @@ where
         }
     }
 
+    /// Read the temperature (VHV) recalibration period in frames; 0 (the
+    /// default after [`Vl53l5cx::init`]) means disabled. See
+    /// [`Vl53l5cx::set_vhv_repeat_count`].
     pub fn get_vhv_repeat_count(&mut self) -> Result<u32, Error<E>> {
         self.bind_platform();
         let (status, count) = sys::wrappers::get_vhv_repeat_count(&mut self.stdev);
@@ -514,6 +612,11 @@ where
         }
     }
 
+    /// Set the period of the firmware's temperature (VHV) recalibration in
+    /// frames: `count` > 0 recalibrates every `count` frames, each run taking a
+    /// few ms; 0 (default after [`Vl53l5cx::init`]) disables it, so compensation is
+    /// calibrated once at the start of each ranging session only. The value is
+    /// not validated. Not while ranging.
     pub fn set_vhv_repeat_count(&mut self, count: u32) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_vhv_repeat_count(&mut self.stdev, count);
@@ -546,6 +649,14 @@ where
         }
     }
 
+    /// Initialise the sensor: check that it answers ([`Vl53l5cx::is_alive`], else
+    /// `Error::NotAlive`), then run ST's `vl53l5cx_init`, which reboots the device,
+    /// uploads the ~84 KB firmware and loads the default configuration; it
+    /// takes a few hundred ms. Call after power-on with AVDD, IOVDD and LPn
+    /// high and I2C_RST low; it also re-initialises a running sensor. Leaves 4x4, 1 Hz,
+    /// [`RangingMode::Autonomous`], 5 ms integration, sharpener 14 %,
+    /// [`TargetOrder::Strongest`], [`PowerMode::Wakeup`] and detection
+    /// thresholds disabled.
     pub fn init(&mut self) -> Result<(), Error<E>> {
         self.stdev.platform.address = (self.address as u16) << 1;
         self.bind_platform();
@@ -562,6 +673,10 @@ where
         Ok(())
     }
 
+    /// Check that a VL53L5CX answers at the current address (device id 0xF0,
+    /// revision 0x02, read via the ULD's `is_alive`). Needs no firmware, so it
+    /// works before [`Vl53l5cx::init`]; `Ok(false)` if the ids do not match. A bus
+    /// failure surfaces through the ULD status as `Error::Firmware`.
     pub fn is_alive(&mut self) -> Result<bool, Error<E>> {
         self.bind_platform();
         let (status, is_alive) = sys::wrappers::is_alive(&mut self.stdev);
@@ -769,6 +884,13 @@ where
     BUS: VlBus<Error = E>,
     D: DelayNs,
 {
+    /// Initialise the motion indicator: fill `motion_config` with ST's defaults
+    /// (movement window 400..=1500 mm) for `resolution` and send it to the
+    /// sensor. `resolution` must match the sensor's; after every later
+    /// [`Vl53l5cx::set_resolution`] call [`Vl53l5cx::motion_indicator_set_resolution`].
+    /// Adjust the window with [`Vl53l5cx::motion_indicator_set_distance_motion`].
+    /// The per-aggregate `motion` results grow with movement (a typical moving
+    /// target gives 100..=500); call before [`Vl53l5cx::start_ranging`].
     pub fn motion_indicator_init(&mut self, motion_config: &mut sys::VL53L5CX_Motion_Configuration, resolution: Resolution) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::motion_indicator_init(&mut self.stdev, motion_config, resolution as u8);
@@ -778,6 +900,12 @@ where
         }
     }
 
+    /// Set the distance window the motion indicator watches, in mm, and send the
+    /// updated `motion_config`. Requires `min >= 400`, `max <= 4000` and
+    /// `max - min <= 1500`; otherwise the ULD returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// Default window 400..=1500 mm. Sensitivity also depends on integration
+    /// time, distance and target reflectance. Not while ranging.
     pub fn motion_indicator_set_distance_motion(&mut self, motion_config: &mut sys::VL53L5CX_Motion_Configuration, min_distance_mm: u16, max_distance_mm: u16) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::motion_indicator_set_distance_motion(&mut self.stdev, motion_config, min_distance_mm, max_distance_mm);
@@ -787,6 +915,11 @@ where
         }
     }
 
+    /// Rebuild the motion indicator's zone map for `resolution` and send the
+    /// updated `motion_config`. Call after every [`Vl53l5cx::set_resolution`]: the
+    /// motion plugin does not follow the sensor's resolution by itself. The 4x4
+    /// map uses one aggregate per zone, the 8x8 map groups the 64 zones into 16
+    /// aggregates of 2x2. Not while ranging.
     pub fn motion_indicator_set_resolution(
         &mut self,
         motion_config: &mut sys::VL53L5CX_Motion_Configuration,
@@ -800,6 +933,8 @@ where
         }
     }
 
+    /// Read whether the detection thresholds are enabled. Default after
+    /// [`Vl53l5cx::init`] is off. See [`Vl53l5cx::set_detection_thresholds_enable`].
     pub fn get_detection_thresholds_enable(&mut self) -> Result<bool, Error<E>> {
         self.bind_platform();
         let (status, enabled) = sys::wrappers::get_detection_thresholds_enable(&mut self.stdev);
@@ -809,6 +944,13 @@ where
         }
     }
 
+    /// Enable or disable the detection thresholds programmed with
+    /// [`Vl53l5cx::set_detection_thresholds`] (default off after [`Vl53l5cx::init`]).
+    /// When enabled, INT fires only for a frame in which a zone meets its
+    /// threshold, instead of for every frame; combined with
+    /// [`RangingMode::Autonomous`] (and a threshold on the motion indicator)
+    /// this is the lowest-power presence detection. Program the thresholds
+    /// first, then enable, then [`Vl53l5cx::start_ranging`].
     pub fn set_detection_thresholds_enable(&mut self, enabled: bool) -> Result<(), Error<E>> {
         self.bind_platform();
         let val = if enabled { 1 } else { 0 };
@@ -826,6 +968,15 @@ where
     BUS: VlBus<Error = E>,
     D: DelayNs,
 {
+    /// Run the ULD's crosstalk calibration (`vl53l5cx_calibrate_xtalk`) against a flat, uniform
+    /// target filling the field of view, in the dark, and keep the resulting
+    /// shape. `reflectance_percent` 1..=99 (ST recommends 3 %), `nb_samples`
+    /// 1..=16 (more is slower but more accurate), `distance_mm` 600..=3000
+    /// (600 mm is easiest). Out-of-range arguments return
+    /// `Error::Firmware(FirmwareError::InvalidParam)`; too little crosstalk
+    /// (no cover glass) returns `FirmwareError::XtalkFailed`. Takes a few
+    /// seconds and restores the previous configuration. Save the shape with
+    /// [`Vl53l5cx::get_caldata_xtalk`]. Not while ranging.
     pub fn calibrate_xtalk(&mut self, reflectance_percent: u16, nb_samples: u8, distance_mm: u16) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::calibrate_xtalk(&mut self.stdev, reflectance_percent, nb_samples, distance_mm);
@@ -835,6 +986,8 @@ where
         }
     }
 
+    /// Read the crosstalk margin in kcps/SPAD. ST documents the default as
+    /// 50 kcps/SPAD. See [`Vl53l5cx::set_xtalk_margin`].
     pub fn get_xtalk_margin(&mut self) -> Result<u32, Error<E>> {
         self.bind_platform();
         let (status, margin) = sys::wrappers::get_xtalk_margin(&mut self.stdev);
@@ -844,6 +997,13 @@ where
         }
     }
 
+    /// Set the crosstalk margin in kcps/SPAD, 0..=10000; above that the ULD returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// ST documents the default as 50 kcps/SPAD. The margin raises the
+    /// crosstalk detection threshold so a cover glass is never reported as a
+    /// target once a calibration ([`Vl53l5cx::calibrate_xtalk`] /
+    /// [`Vl53l5cx::set_caldata_xtalk`]) is loaded, and lets one unit's calibration
+    /// be reused on others and tuned per unit. Not while ranging.
     pub fn set_xtalk_margin(&mut self, margin: u32) -> Result<(), Error<E>> {
         self.bind_platform();
         let status = sys::wrappers::set_xtalk_margin(&mut self.stdev, margin);
@@ -853,6 +1013,12 @@ where
         }
     }
 
+    /// Read the crosstalk shape the sensor is currently using into `buffer`,
+    /// which must hold at least [`XTALK_BUFFER_SIZE`] (776) bytes, else
+    /// `Error::Firmware(FirmwareError::InvalidParam)`. This is the ULD
+    /// default, the shape produced by [`Vl53l5cx::calibrate_xtalk`], or whatever
+    /// [`Vl53l5cx::set_caldata_xtalk`] loaded; store it and replay it with
+    /// `set_caldata_xtalk` after the next power-up. Not while ranging.
     pub fn get_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<E>> {
         // Use local constant for buffer size
         if buffer.len() < XTALK_BUFFER_SIZE {
@@ -866,6 +1032,12 @@ where
         }
     }
 
+    /// Load a crosstalk shape saved with [`Vl53l5cx::get_caldata_xtalk`] (e.g. from
+    /// flash) so a calibrated cover glass works without recalibrating after
+    /// each power-up. `buffer` must hold at least [`XTALK_BUFFER_SIZE`] (776)
+    /// bytes, else `Error::Firmware(FirmwareError::InvalidParam)`; only the
+    /// first 776 are used. Call after [`Vl53l5cx::init`] and before ranging; set
+    /// [`Vl53l5cx::set_xtalk_margin`] if the shape came from another unit.
     pub fn set_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<E>> {
          // Use local constant for buffer size
          if buffer.len() < XTALK_BUFFER_SIZE {
@@ -913,6 +1085,14 @@ where
         Ok(rust_thresholds)
     }
 
+    /// Program the 64 detection-threshold entries (`VL53L8CX_NB_THRESHOLDS`).
+    /// Give `low_threshold` / `high_threshold` in each entry's natural units
+    /// (mm, kcps/SPAD, ...); ST's ULD applies the firmware's fixed-point scaling.
+    /// Three layouts: 4x4 with one entry per zone (16 used), 4x4 with two per
+    /// zone (32; `mathematic_operation` combines the pair), or 8x8 with one per
+    /// zone (64). ST's header says to OR `VL53L8CX_LAST_THRESHOLD` (128) into
+    /// the `zone_num` of the last entry used; leave unused entries zero. Then
+    /// enable with [`Vl53l5cx::set_detection_thresholds_enable`] before ranging.
     pub fn set_detection_thresholds(&mut self, thresholds: [DetectionThreshold; VL53L5CX_NB_THRESHOLDS as usize]) -> Result<(), Error<E>> {
         self.bind_platform();
 

@@ -99,6 +99,10 @@ whole driver, following the C sources:
   with N by `sensor::NB_TARGET_CONFIG_PATCH`, and the firmware target count
   DCI (`VL53L8CX_DCI_FW_NB_TARGET`) is written as the ULD does for `N != 1`.
 
+The firmware only reports two returns in one zone as separate targets when
+they are at least 600 mm apart (UM2884); closer surfaces merge into one
+target. `set_target_order` chooses which target comes first.
+
 Enabling more than one `targets-N` feature is a compile error. The
 single-target build is checked against the C ULD by the oracle tests; the
 multi-target constants are checked against the header's literal values.

@@ -155,6 +155,8 @@ mod tests {
     ///
     /// Requires a scene with two surfaces in the field of view, e.g. a clear
     /// plastic lid ~20 mm above the sensor and a ceiling/laptop ~100 mm away.
+    /// The two surfaces must be at least 600 mm apart to be reported as
+    /// separate targets (UM2884); closer pairs merge into one return.
     /// Logs, per zone, the firmware's detected-target count and the first two
     /// targets' distance/status, and warns if no zone in any frame reported
     /// two or more targets — seeing a second target is the proof that the

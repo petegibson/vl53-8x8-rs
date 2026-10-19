@@ -117,6 +117,12 @@ where
     BUS: VlBusAsync,
     D: DelayNs,
 {
+    /// Create a driver over `bus` (an `embedded-hal-async` I2C bus, or
+    /// [`BlockingI2c`] / [`BlockingSpi`] / [`Spi`] adapters) at
+    /// [`DEFAULT_ADDRESS`] (0x29), with no LPn or INT pin attached. Nothing is
+    /// sent to the sensor until [`Sensor::init`]. Attach pins with the
+    /// `with_*_pin_*` builders and pick another address with
+    /// [`Sensor::with_address`].
     pub fn new(bus: BUS, delay: D) -> Self {
         Self {
             bus,
@@ -137,6 +143,9 @@ where
     SPI: embedded_hal_async::spi::SpiDevice,
     D: DelayNs,
 {
+    /// Create a driver over an `embedded-hal-async` `SpiDevice` (the
+    /// VL53L8CX's SPI interface; the VL53L5CX is I2C only). Otherwise as
+    /// [`Sensor::new`]: no pins attached, nothing sent until [`Sensor::init`].
     pub fn new_spi(spi: SPI, delay: D) -> Self {
         Self {
             bus: Spi { spi },
@@ -362,6 +371,14 @@ where
     /// Detect the connected sensor variant, then upload its (patched) firmware
     /// and bring the sensor up. The detected variant is stored and available
     /// via [`Sensor::variant`].
+    ///
+    /// Call after power-on with AVDD, IOVDD and LPn high (I2C_RST low on a
+    /// VL53L5CX); the sensor must answer at the current address, else
+    /// `Error::NotAlive`. The upload is ~84 KB and takes a few hundred ms; the
+    /// same call re-initialises a running sensor. Leaves 4x4, 1 Hz,
+    /// [`RangingMode::Autonomous`], 5 ms integration, sharpener 14 %,
+    /// [`TargetOrder::Strongest`], [`PowerMode::Wakeup`] and detection
+    /// thresholds disabled.
     pub async fn init(&mut self) -> Result<(), Error<BUS::Error>> {
         self.variant = sensor::detect(&mut self.bus, self.address).await?;
 
@@ -403,12 +420,26 @@ where
         }
     }
 
+    /// Move the sensor to `new_address` (7-bit) and use it for all further
+    /// traffic. With several sensors on one bus, hold every other sensor's LPn
+    /// low while calling this so only the target sensor hears the command, then
+    /// release them ([`Sensor::with_reset_pin_active_low`]). It is a register
+    /// write, not a firmware command, so it works before [`Sensor::init`] as in
+    /// ST's multi-sensor example. The address is not retained: a power cycle
+    /// returns the sensor to [`DEFAULT_ADDRESS`]. The value is not validated.
     pub async fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<BUS::Error>> {
         ops::set_i2c_address(&mut self.bus, self.address, new_address).await?;
         self.address = new_address;
         Ok(())
     }
 
+    /// Start a ranging session with the current configuration. Settings cannot
+    /// be changed while ranging: set resolution, frequency, mode, integration
+    /// time, sharpener, target order, thresholds and motion first, then start,
+    /// then loop on [`Sensor::check_data_ready`] (or the INT pin) and
+    /// [`Sensor::get_ranging_data`], and finish with [`Sensor::stop_ranging`].
+    /// On a VL53L8CX the firmware's laser-safety self-test is read here
+    /// and a fault is `Error::Firmware(FirmwareError::LaserSafety)`.
     pub async fn start_ranging(&mut self) -> Result<(), Error<BUS::Error>> {
         ops::start_ranging(
             &mut self.bus,
@@ -420,14 +451,35 @@ where
         .await
     }
 
+    /// Stop the session started by [`Sensor::start_ranging`]. Required before
+    /// changing settings or the power mode and, on a VL53L8CX, after a detection-threshold auto-stop
+    /// interrupt ([`Sensor::set_detection_thresholds_auto_stop`]). Afterwards the sensor is
+    /// idle in its current power mode, keeps its configuration and can be
+    /// reconfigured and restarted.
     pub async fn stop_ranging(&mut self) -> Result<(), Error<BUS::Error>> {
         ops::stop_ranging(&mut self.bus, self.address, &mut self.delay, &mut self.stdev).await
     }
 
+    /// Poll the sensor over the bus for a new frame: `Ok(true)` once per frame,
+    /// when it is ready to be read with [`Sensor::get_ranging_data`]. Polling
+    /// pattern without an INT pin: call this in a loop with a short delay (a few
+    /// ms) until it returns `true`, read the frame, repeat.
+    /// [`Sensor::poll_data_ready`] does exactly this; with INT wired use
+    /// [`Sensor::wait_for_data_ready`] instead. A
+    /// firmware error flagged in the status bytes is returned as
+    /// `Error::Firmware`.
     pub async fn check_data_ready(&mut self) -> Result<bool, Error<BUS::Error>> {
         ops::check_data_ready(&mut self.bus, self.address, &mut self.stdev).await
     }
 
+    /// Read the latest frame into a [`ResultsData`]. Call after
+    /// [`Sensor::check_data_ready`] returned `true` or INT fired. Per-zone arrays
+    /// (`nb_target_detected`, `ambient_per_spad`, ...) are indexed by zone;
+    /// per-target arrays (`distance_mm`, `target_status`, ...) by
+    /// `zone * NB_TARGET_PER_ZONE + target` ([`NB_TARGET_PER_ZONE`]). In 4x4
+    /// only the first 16 zones are filled. Units are mm, kcps/SPAD and %
+    /// unless `raw-format`. A frame whose block headers do not match is
+    /// `Error::Firmware(FirmwareError::CorruptedFrame)`. See [`ResultsData`].
     pub async fn get_ranging_data(&mut self) -> Result<ResultsData, Error<BUS::Error>> {
         ops::get_ranging_data(
             &mut self.bus,
@@ -452,12 +504,20 @@ where
 
     /// Set the zone grid. Also re-sends the offset and crosstalk calibration
     /// data, which are resolution dependent (see [`ops::set_resolution`]).
+    ///
+    /// Default after [`Sensor::init`] is [`Resolution::Res4x4`]; 8x8 means four
+    /// times the bus traffic per frame. Set this **before**
+    /// [`Sensor::set_ranging_frequency_hz`], whose allowed range depends on
+    /// it, and with the motion indicator follow with
+    /// [`Sensor::motion_indicator_set_resolution`]. Not while ranging.
     pub async fn set_resolution(&mut self, resolution: Resolution) -> Result<(), Error<BUS::Error>> {
         ops::set_resolution(
             &mut self.bus, self.address, &mut self.delay, &mut self.stdev, resolution as u8,
         ).await
     }
 
+    /// Read the current zone grid. Default after [`Sensor::init`] is
+    /// [`Resolution::Res4x4`].
     pub async fn get_resolution(&mut self) -> Result<Resolution, Error<BUS::Error>> {
         let res = ops::get_resolution(
             &mut self.bus, self.address, &mut self.delay, &mut self.stdev.temp_buffer,
@@ -469,6 +529,13 @@ where
         }
     }
 
+    /// Set the ranging frequency in Hz (frames per second): 1..=60 Hz in 4x4,
+    /// 1..=15 Hz in 8x8; default 1 Hz after [`Sensor::init`]. The limits depend on
+    /// the resolution, so call [`Sensor::set_resolution`] first. Neither this
+    /// driver nor ST's ULD checks the value: the firmware enforces the limits.
+    /// In [`RangingMode::Autonomous`] the frame period must also exceed the
+    /// integration time(s) plus 1 ms, see [`Sensor::set_integration_time_ms`].
+    /// Not while ranging.
     pub async fn set_ranging_frequency_hz(&mut self, frequency_hz: u8) -> Result<(), Error<BUS::Error>> {
         let mut data = [0u8; 4];
         ops::dci_replace(
@@ -479,6 +546,7 @@ where
         ).await
     }
 
+    /// Read the ranging frequency in Hz. Default after [`Sensor::init`] is 1 Hz.
     pub async fn get_ranging_frequency_hz(&mut self) -> Result<u8, Error<BUS::Error>> {
         let mut buf = [0u8; 4];
         ops::dci_read(
@@ -489,6 +557,13 @@ where
         Ok(buf[0x01])
     }
 
+    /// Set the integration time in ms, 2..=1000; anything else returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// Default 5 ms after [`Sensor::init`]. Only meaningful in
+    /// [`RangingMode::Autonomous`] (no effect in continuous mode). 4x4
+    /// integrates once per frame, 8x8 four times; the sum of the integrations
+    /// plus 1 ms of overhead must fit in the frame period (1 / frequency),
+    /// otherwise the sensor lengthens the period by itself. Not while ranging.
     pub async fn set_integration_time_ms(&mut self, time_ms: u32) -> Result<(), Error<BUS::Error>> {
         if time_ms < 2 || time_ms > 1000 {
             return Err(Error::Firmware(FirmwareError::InvalidParam));
@@ -503,6 +578,7 @@ where
         ).await
     }
 
+    /// Read the integration time in ms. Default after [`Sensor::init`] is 5 ms.
     pub async fn get_integration_time_ms(&mut self) -> Result<u32, Error<BUS::Error>> {
         let mut buf = [0u8; 20];
         ops::dci_read(
@@ -514,6 +590,12 @@ where
         Ok(time_us / 1000)
     }
 
+    /// Choose which detected target a zone reports first: [`TargetOrder::Closest`]
+    /// or [`TargetOrder::Strongest`] (default after [`Sensor::init`]). With the
+    /// default single target per zone this selects the one target reported;
+    /// with a `targets-N` feature it orders the list ([`NB_TARGET_PER_ZONE`]).
+    /// Two targets in one zone are only told apart when at least 600 mm apart.
+    /// Not while ranging.
     pub async fn set_target_order(&mut self, order: TargetOrder) -> Result<(), Error<BUS::Error>> {
         let val = order as u8;
         let mut data = [0u8; 4];
@@ -525,6 +607,8 @@ where
         ).await
     }
 
+    /// Read the target order. Default after [`Sensor::init`] is
+    /// [`TargetOrder::Strongest`].
     pub async fn get_target_order(&mut self) -> Result<TargetOrder, Error<BUS::Error>> {
         let mut buf = [0u8; 4];
         ops::dci_read(
@@ -539,6 +623,13 @@ where
         }
     }
 
+    /// Set the ranging mode. [`RangingMode::Autonomous`] (default after
+    /// [`Sensor::init`]) fires the VCSEL only for the integration time of each
+    /// frame: lower power, the more so at low frequency; the first frame's
+    /// period may be shorter than configured. [`RangingMode::Continuous`] keeps
+    /// the VCSEL on throughout: best range and ambient immunity, for fast or
+    /// high-performance ranging; the integration time is ignored. Not while
+    /// ranging.
     pub async fn set_ranging_mode(&mut self, mode: RangingMode) -> Result<(), Error<BUS::Error>> {
         let mut data = [0u8; 8];
         ops::dci_read(
@@ -575,6 +666,8 @@ where
         ).await
     }
 
+    /// Read the ranging mode. Default after [`Sensor::init`] is
+    /// [`RangingMode::Autonomous`].
     pub async fn get_ranging_mode(&mut self) -> Result<RangingMode, Error<BUS::Error>> {
         let mut buf = [0u8; 8];
         ops::dci_read(
@@ -589,6 +682,12 @@ where
         }
     }
 
+    /// Set the sharpener in percent, 0..=99; 100 or more returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// Default 14 % after [`Sensor::init`]. The sharpener removes veiling-glare
+    /// signal spilling from a close target into neighbouring zones; a higher
+    /// value trims more of that spread, 0 disables it. Stored in 1/255 steps, so
+    /// the readback can be 1 % below the value set. Not while ranging.
     pub async fn set_sharpener_percent(&mut self, percent: u8) -> Result<(), Error<BUS::Error>> {
         if percent >= 100 {
             return Err(Error::Firmware(FirmwareError::InvalidParam));
@@ -603,6 +702,8 @@ where
         ).await
     }
 
+    /// Read the sharpener in percent. Default after [`Sensor::init`] is 14 %; the
+    /// value is stored in 1/255 steps, so it can read 1 % below what was set.
     pub async fn get_sharpener_percent(&mut self) -> Result<u8, Error<BUS::Error>> {
         let mut buf = [0u8; 16];
         ops::dci_read(
@@ -613,6 +714,14 @@ where
         Ok((buf[0x0D] as u16 * 100 / 255) as u8)
     }
 
+    /// Set the power mode; the sensor must not be ranging (call
+    /// [`Sensor::stop_ranging`] first). Default after [`Sensor::init`] is
+    /// [`PowerMode::Wakeup`] (HP idle, ready to range). [`PowerMode::Sleep`]
+    /// (LP idle) keeps firmware and configuration but cannot range until woken.
+    /// [`PowerMode::DeepSleep`] is VL53L8CX only: waking from it re-uploads the
+    /// firmware, so the configuration returns to the `init()` defaults; on a
+    /// VL53L5CX it returns `Error::Firmware(FirmwareError::InvalidParam)`
+    /// without touching the bus. Setting the current mode is a no-op.
     pub async fn set_power_mode(&mut self, mode: PowerMode) -> Result<(), Error<BUS::Error>> {
         // Deep sleep is L8 only; reject it on parts without it (e.g. L5).
         if mode == PowerMode::DeepSleep && !self.variant.info().has_deep_sleep {
@@ -675,6 +784,8 @@ where
         Ok(())
     }
 
+    /// Read the power mode. Default after [`Sensor::init`] is
+    /// [`PowerMode::Wakeup`]. Deep sleep is only distinguished from sleep on a VL53L8CX.
     pub async fn get_power_mode(&mut self) -> Result<PowerMode, Error<BUS::Error>> {
         self.bus.write_byte(self.address, 0x7FFF, 0x00).await.map_err(Error::Bus)?;
         let tmp = self.bus.read_byte(self.address, 0x009).await.map_err(Error::Bus)?;
@@ -702,6 +813,11 @@ where
         Ok(mode)
     }
 
+    /// Set the period of the firmware's temperature (VHV) recalibration in
+    /// frames: `count` > 0 recalibrates every `count` frames, each run taking a
+    /// few ms; 0 (default after [`Sensor::init`]) disables it, so compensation is
+    /// calibrated once at the start of each ranging session only. The value is
+    /// not validated. Not while ranging.
     pub async fn set_vhv_repeat_count(&mut self, count: u32) -> Result<(), Error<BUS::Error>> {
         let count_bytes = count.to_le_bytes();
         let mut data = [0u8; 16];
@@ -713,6 +829,9 @@ where
         ).await
     }
 
+    /// Read the temperature (VHV) recalibration period in frames; 0 (the
+    /// default after [`Sensor::init`]) means disabled. See
+    /// [`Sensor::set_vhv_repeat_count`].
     pub async fn get_vhv_repeat_count(&mut self) -> Result<u32, Error<BUS::Error>> {
         let mut buf = [0u8; 16];
         ops::dci_read(
@@ -804,6 +923,8 @@ where
     BUS: VlBusAsync,
     D: DelayNs,
 {
+    /// Read whether the detection thresholds are enabled. Default after
+    /// [`Sensor::init`] is off. See [`Sensor::set_detection_thresholds_enable`].
     pub async fn get_detection_thresholds_enable(&mut self) -> Result<bool, Error<BUS::Error>> {
         let mut buf = [0u8; 8];
         ops::dci_read(
@@ -814,6 +935,13 @@ where
         Ok(buf[0x01] != 0)
     }
 
+    /// Enable or disable the detection thresholds programmed with
+    /// [`Sensor::set_detection_thresholds`] (default off after [`Sensor::init`]).
+    /// When enabled, INT fires only for a frame in which a zone meets its
+    /// threshold, instead of for every frame; combined with
+    /// [`RangingMode::Autonomous`] (and a threshold on the motion indicator)
+    /// this is the lowest-power presence detection. Program the thresholds
+    /// first, then enable, then [`Sensor::start_ranging`].
     pub async fn set_detection_thresholds_enable(&mut self, enabled: bool) -> Result<(), Error<BUS::Error>> {
         let grp_global_config: [u8; 4] = if enabled {
             [0x01, 0x01, 0x01, 0x00]
@@ -875,6 +1003,10 @@ where
         }
     }
 
+    /// Read the 64 detection-threshold entries, with `low_threshold` /
+    /// `high_threshold` converted back from the firmware's fixed-point format
+    /// to each entry's natural units (mm, kcps/SPAD, ...). See
+    /// [`DetectionThreshold`] and [`Sensor::set_detection_thresholds`].
     pub async fn get_detection_thresholds(
         &mut self,
     ) -> Result<[DetectionThreshold; NB_THRESHOLDS], Error<BUS::Error>> {
@@ -929,6 +1061,14 @@ where
         ).await
     }
 
+    /// Program the 64 detection-threshold entries (`VL53L8CX_NB_THRESHOLDS`).
+    /// Give `low_threshold` / `high_threshold` in each entry's natural units
+    /// (mm, kcps/SPAD, ...); the driver applies the firmware's fixed-point scaling.
+    /// Three layouts: 4x4 with one entry per zone (16 used), 4x4 with two per
+    /// zone (32; `mathematic_operation` combines the pair), or 8x8 with one per
+    /// zone (64). ST's header says to OR `VL53L8CX_LAST_THRESHOLD` (128) into
+    /// the `zone_num` of the last entry used; leave unused entries zero. Then
+    /// enable with [`Sensor::set_detection_thresholds_enable`] before ranging.
     pub async fn set_detection_thresholds(
         &mut self,
         mut thresholds: [DetectionThreshold; NB_THRESHOLDS],
@@ -962,6 +1102,13 @@ where
     BUS: VlBusAsync,
     D: DelayNs,
 {
+    /// Initialise the motion indicator: fill `motion_config` with ST's defaults
+    /// (movement window 400..=1500 mm) for `resolution` and send it to the
+    /// sensor. `resolution` must match the sensor's; after every later
+    /// [`Sensor::set_resolution`] call [`Sensor::motion_indicator_set_resolution`].
+    /// Adjust the window with [`Sensor::motion_indicator_set_distance_motion`].
+    /// The per-aggregate `motion` results grow with movement (a typical moving
+    /// target gives 100..=500); call before [`Sensor::start_ranging`].
     pub async fn motion_indicator_init(
         &mut self,
         motion_config: &mut MotionConfiguration,
@@ -986,6 +1133,12 @@ where
         self.motion_indicator_set_resolution(motion_config, resolution).await
     }
 
+    /// Set the distance window the motion indicator watches, in mm, and send the
+    /// updated `motion_config`. Requires `min >= 400`, `max <= 4000` and
+    /// `max - min <= 1500`; otherwise returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// Default window 400..=1500 mm. Sensitivity also depends on integration
+    /// time, distance and target reflectance. Not while ranging.
     pub async fn motion_indicator_set_distance_motion(
         &mut self,
         motion_config: &mut MotionConfiguration,
@@ -1019,6 +1172,11 @@ where
         ).await
     }
 
+    /// Rebuild the motion indicator's zone map for `resolution` and send the
+    /// updated `motion_config`. Call after every [`Sensor::set_resolution`]: the
+    /// motion plugin does not follow the sensor's resolution by itself. The 4x4
+    /// map uses one aggregate per zone, the 8x8 map groups the 64 zones into 16
+    /// aggregates of 2x2. Not while ranging.
     pub async fn motion_indicator_set_resolution(
         &mut self,
         motion_config: &mut MotionConfiguration,
@@ -1060,6 +1218,8 @@ where
     BUS: VlBusAsync,
     D: DelayNs,
 {
+    /// Read the crosstalk margin in kcps/SPAD. ST documents the default as
+    /// 50 kcps/SPAD. See [`Sensor::set_xtalk_margin`].
     pub async fn get_xtalk_margin(&mut self) -> Result<u32, Error<BUS::Error>> {
         let mut buf = [0u8; 16];
         ops::dci_read(
@@ -1071,6 +1231,13 @@ where
         Ok(margin / 2048)
     }
 
+    /// Set the crosstalk margin in kcps/SPAD, 0..=10000; above that returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// ST documents the default as 50 kcps/SPAD. The margin raises the
+    /// crosstalk detection threshold so a cover glass is never reported as a
+    /// target once a calibration ([`Sensor::calibrate_xtalk`] /
+    /// [`Sensor::set_caldata_xtalk`]) is loaded, and lets one unit's calibration
+    /// be reused on others and tuned per unit. Not while ranging.
     pub async fn set_xtalk_margin(&mut self, margin: u32) -> Result<(), Error<BUS::Error>> {
         if margin > 10000 {
             return Err(Error::Firmware(FirmwareError::InvalidParam));
@@ -1195,6 +1362,14 @@ where
         outcome
     }
 
+    /// Load a crosstalk shape saved with [`Sensor::get_caldata_xtalk`] (e.g. from
+    /// flash) so a calibrated cover glass works without recalibrating after
+    /// each power-up. `buffer` must hold at least [`XTALK_BUFFER_SIZE`] (776)
+    /// bytes, else `Error::Firmware(FirmwareError::InvalidParam)`; only the
+    /// first 776 are used. Call after [`Sensor::init`] and before ranging; set
+    /// [`Sensor::set_xtalk_margin`] if the shape came from another unit.
+    /// The shape is kept in the driver state and re-sent on every
+    /// [`Sensor::set_resolution`].
     pub async fn set_caldata_xtalk(&mut self, buffer: &mut [u8]) -> Result<(), Error<BUS::Error>> {
         if buffer.len() < XTALK_BUFFER_SIZE {
             return Err(Error::Firmware(FirmwareError::InvalidParam));

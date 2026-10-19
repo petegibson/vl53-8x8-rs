@@ -299,7 +299,9 @@ mod tests {
     /// Multi-target scene check (only built with a `targets-N` feature, N > 1).
     ///
     /// Requires a scene with two surfaces in the field of view, e.g. a clear
-    /// plastic lid ~15-20 mm above the shield and the ceiling beyond it. Logs,
+    /// plastic lid ~15-20 mm above the shield and the ceiling beyond it. The
+    /// two surfaces must be at least 600 mm apart to be reported as separate
+    /// targets (UM2884); closer pairs merge into one return. Logs,
     /// per zone, the firmware's detected-target count and the first two
     /// targets' distance/status, and warns if no zone in any frame reported
     /// two or more targets.
