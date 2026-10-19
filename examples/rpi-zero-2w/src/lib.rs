@@ -158,8 +158,8 @@ impl<T: embedded_hal::spi::SpiDevice<u8>> embedded_hal_async::spi::SpiDevice<u8>
 /// Pulse PWR_EN low → 50 ms → high. The Pololu breakout doesn't expose a
 /// PWR_EN pin (the LDO is always on while VIN has 3V3), so this is a
 /// no-op kept for API symmetry with the FTDI helper. If you switch to a
-/// board that gates the LDO, wire it to a spare GPIO and call into the
-/// usual `OutputPin` toggle here.
+/// board that gates the LDO, wire it to a spare GPIO and attach it with
+/// `with_power_enable_pin_active_high`; `power_cycle()` then does this.
 pub fn power_up_board() {
     // No-op on the Pololu board.
 }

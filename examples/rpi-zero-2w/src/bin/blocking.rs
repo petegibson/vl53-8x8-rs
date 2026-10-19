@@ -29,10 +29,12 @@ fn main() -> anyhow::Result<()> {
     log::info!("Acquiring LPn on BCM GPIO{LPN_GPIO}...");
     let lpn: LpnPin = open_lpn().context("open LPn — is the user in the gpio group, or run with sudo?")?;
 
-    let mut sensor = Vl53l8cx::new_spi(spi, StdDelay).with_reset_pin_active_low(lpn);
+    let mut sensor = Vl53l8cx::new_spi(spi, StdDelay).with_lpn_pin(lpn);
 
-    sensor.reset().context("LPn pulse (I2C enable; init() does the real reboot)")?;
-    std::thread::sleep(Duration::from_millis(10));
+    // open_lpn() leaves the line low; drive it high (comms enable). The Pololu
+    // board has no PWR_EN, so there is no power_cycle(); init() reboots the
+    // sensor in software.
+    sensor.lpn_enable().context("drive LPn high")?;
 
     log::info!(
         "Uploading firmware (~{FIRMWARE_SIZE_KB} KB, ~{:.1} s at {freq})...",

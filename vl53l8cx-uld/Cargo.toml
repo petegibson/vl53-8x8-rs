@@ -1,6 +1,6 @@
 [package]
 name = "vl53l8cx-uld"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
@@ -17,6 +17,8 @@ features = ["xtalk", "motion", "thresholds"]
 [dependencies]
 embedded-hal = "1.0.0" # Using the stable 1.0 version of the hardware abstraction layer.
 vl53l8cx-uld-sys = { path = "../vl53l8cx-uld-sys", version = "0.1.0" }
+# Re-exported through the sys crate; named here for the 0.1.1 floor (`MaybeOutputPin`).
+vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.1" }
 defmt = { version = "1", optional = true }
 
 [features]

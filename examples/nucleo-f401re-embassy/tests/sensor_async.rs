@@ -8,7 +8,10 @@ use embassy_time::Delay;
 use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder, NB_TARGET_PER_ZONE};
 
 #[cfg(feature = "thresholds")]
-use vl53_8x8::{DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType};
+use vl53_8x8::{
+    DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType,
+    VL53L8CX_LAST_THRESHOLD,
+};
 #[cfg(any(feature = "motion", feature = "thresholds"))]
 use vl53_8x8::MotionConfiguration;
 
@@ -32,19 +35,21 @@ mod bus_setup {
     pub type Sensor = vl53_8x8::Sensor<
         vl53_8x8::BlockingI2c<I2cInst>,
         Delay,
-        Output<'static>,
-        embassy_stm32::gpio::Input<'static>,
+        Output<'static>,                    // LPn (comms enable)
+        embassy_stm32::gpio::Input<'static>, // INT
+        Output<'static>,                    // PWR_EN_C (active high)
     >;
 
     #[cfg(not(feature = "blocking-i2c"))]
     pub type Sensor = vl53_8x8::Sensor<
         I2cInst,
         Delay,
-        Output<'static>,
-        embassy_stm32::gpio::Input<'static>,
+        Output<'static>,                    // LPn (comms enable)
+        embassy_stm32::gpio::Input<'static>, // INT
+        Output<'static>,                    // PWR_EN_C (active high)
     >;
 
-    pub fn init_bus(p: &mut embassy_stm32::Peripherals) -> Sensor {
+    pub fn init_bus(p: &mut embassy_stm32::Peripherals, pwr_en_c: Output<'static>) -> Sensor {
         let _i2c_rst_c = Output::new(
             unsafe { core::ptr::read(&raw const p.PB3) },
             Level::Low,
@@ -74,8 +79,9 @@ mod bus_setup {
             Level::Low,
             Speed::Low,
         );
-        // LPn LOW = I2C disabled, HIGH = I2C enabled (it is a comms enable, not a reset).
-        // Pulse reset then leave HIGH so sensor is ready for init().
+        // LPn LOW = I2C disabled, HIGH = I2C enabled (it is a comms enable, not a
+        // reset). Leave it HIGH so the sensor is ready for init(); the handle's
+        // power_cycle() drives it with PWR_EN when a test needs a real reset.
         lp_c.set_low();
         cortex_m::asm::delay(84_000 * 10);
         lp_c.set_high();
@@ -87,8 +93,9 @@ mod bus_setup {
         let sensor = vl53_8x8::Sensor::new(i2c, Delay);
 
         sensor
-            .with_reset_pin_active_low(lp_c)
+            .with_lpn_pin(lp_c)
             .with_interrupt_pin_active_low(int_c)
+            .with_power_enable_pin_active_high(pwr_en_c)
     }
 }
 
@@ -114,11 +121,12 @@ mod bus_setup {
     pub type Sensor = vl53_8x8::Sensor<
         vl53_8x8::Spi<SpiDev>,
         Delay,
-        Output<'static>,
-        embassy_stm32::gpio::Input<'static>,
+        Output<'static>,                    // LPn (comms enable)
+        embassy_stm32::gpio::Input<'static>, // INT
+        Output<'static>,                    // PWR_EN_C (active high)
     >;
 
-    pub fn init_bus(p: &mut embassy_stm32::Peripherals) -> Sensor {
+    pub fn init_bus(p: &mut embassy_stm32::Peripherals, pwr_en_c: Output<'static>) -> Sensor {
         let int_c = embassy_stm32::gpio::Input::new(
             unsafe { core::ptr::read(&raw const p.PA4) },
             Pull::Up,
@@ -154,16 +162,18 @@ mod bus_setup {
             Level::Low,
             Speed::Low,
         );
-        // LPn LOW = I2C disabled, HIGH = I2C enabled (it is a comms enable, not a reset).
-        // Pulse reset then leave HIGH so sensor is ready for init().
+        // LPn LOW = I2C disabled, HIGH = I2C enabled (it is a comms enable, not a
+        // reset). Leave it HIGH so the sensor is ready for init(); the handle's
+        // power_cycle() drives it with PWR_EN when a test needs a real reset.
         lp_c.set_low();
         cortex_m::asm::delay(84_000 * 10);
         lp_c.set_high();
         cortex_m::asm::delay(84_000 * 100);
 
         vl53_8x8::Sensor::new_spi(spi_device, Delay)
-            .with_reset_pin_active_low(lp_c)
+            .with_lpn_pin(lp_c)
             .with_interrupt_pin_active_low(int_c)
+            .with_power_enable_pin_active_high(pwr_en_c)
     }
 }
 
@@ -208,7 +218,8 @@ fn board_init_async() -> Sensor {
 
     let mut p = embassy_stm32::init(config);
 
-    // Power-up sequence
+    // Power-up sequence (board bring-up; the sensor handle's power_cycle()
+    // does the same, driving LPn along with PWR_EN, once it owns the pin).
     let mut pwr_en_c = Output::new(
         unsafe { core::ptr::read(&raw const p.PA7) },
         Level::Low,
@@ -218,9 +229,8 @@ fn board_init_async() -> Sensor {
     cortex_m::asm::delay(84_000 * 50);
     pwr_en_c.set_high();
     cortex_m::asm::delay(84_000 * 50);
-    core::mem::forget(pwr_en_c);
 
-    bus_setup::init_bus(&mut p)
+    bus_setup::init_bus(&mut p, pwr_en_c)
 }
 
 #[embedded_test::tests]
@@ -493,12 +503,12 @@ mod tests {
 
     #[test]
     #[timeout(15)]
-    async fn test_reinit_after_reset(mut sensor: SensorRef) {
+    async fn test_reinit_after_power_cycle(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res8x8).await.unwrap();
 
-        // Reset and re-init
-        sensor.reset().await.unwrap();
+        // Power-cycle (PWR_EN_C + LPn, UM2884 §4.2) and re-init
+        sensor.power_cycle().await.unwrap();
         cortex_m::asm::delay(84_000 * 100);
         sensor.init().await.unwrap();
 
@@ -607,9 +617,11 @@ mod tests {
 
         let mut thresholds: [DetectionThreshold; 64] = unsafe { core::mem::zeroed() };
 
-        // Configure zone 0: trigger when distance < 500 mm
+        // Configure zone 0: trigger when distance < 500 mm. It is the only
+        // (hence last) entry, so ST's header requires VL53L8CX_LAST_THRESHOLD
+        // OR'd into its zone_num.
         thresholds[0] = DetectionThreshold {
-            zone_num: 0,
+            zone_num: 0 | VL53L8CX_LAST_THRESHOLD,
             measurement: ThresholdMeasurement::DistanceMm,
             threshold_type: ThresholdType::LessThanEqualMin,
             low_threshold: 500,
@@ -620,7 +632,7 @@ mod tests {
         sensor.set_detection_thresholds(thresholds).await.unwrap();
         let readback = sensor.get_detection_thresholds().await.unwrap();
 
-        defmt::assert_eq!(readback[0].zone_num, 0);
+        defmt::assert_eq!(readback[0].zone_num & !VL53L8CX_LAST_THRESHOLD, 0);
         defmt::assert_eq!(readback[0].low_threshold, 500);
     }
 

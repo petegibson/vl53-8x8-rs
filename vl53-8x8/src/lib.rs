@@ -9,14 +9,18 @@ reimplements the ST Ultra Lite Driver (ULD) protocol in Rust: there is no C
 code, no FFI and no build script, so it builds for any target without libclang.
 It detects the connected part at runtime ([`detect`], [`Variant`]) and uploads a
 single shared firmware image patched per variant ([`firmware`], [`sensor`]).
-The entry point is [`Sensor`]; [`Spi`] adapts an `SpiDevice` to the bus trait
+The entry point is [`Sensor`]; its optional pins are LPn (I2C comms enable,
+[`Sensor::with_lpn_pin`]), INT (data ready) and a power-enable line
+([`Sensor::power_cycle`] is the sensor's only real reset); [`pulse_i2c_rst`]
+drives the VL53L5CX's I2C_RST. [`Spi`] adapts an `SpiDevice` to the bus trait
 and [`BlockingI2c`] / [`BlockingSpi`] wrap blocking `embedded-hal` I2C and SPI
 buses (blocking HALs, RTIC 2, no executor).
 
 Crate family:
 
-- `vl53-8x8-types`: shared enums, `Error` and result types; no dependencies.
-  Re-exported here so dependants need only this crate.
+- `vl53-8x8-types`: shared enums, `Error`, pin placeholders and result types
+  (its only dependency is `embedded-hal`). Re-exported here so dependants need
+  only this crate.
 - `vl53-8x8` (this crate): the pure-Rust L5CX/L8CX driver.
 - `vl53l8cx-uld-sys` / `vl53l5cx-uld-sys`: bindgen + cc over ST's L8CX and
   L5CX ULD C sources.
@@ -54,6 +58,8 @@ mod uld_data;
 
 #[cfg(test)]
 mod oracle_tests;
+#[cfg(test)]
+mod pin_tests;
 
 use bus::VlBusAsync;
 use embedded_hal::digital::{InputPin, OutputPin};
@@ -65,7 +71,7 @@ use vl53_8x8_types as types;
 
 // Shared types, re-exported so dependants need only this crate.
 pub use types::{
-    Error, FirmwareError, NoPin, PowerMode, RangingMode, Resolution, TargetOrder,
+    Error, FirmwareError, MaybeOutputPin, NoPin, PowerMode, RangingMode, Resolution, TargetOrder,
     DEFAULT_ADDRESS, XTALK_BUFFER_SIZE,
 };
 
@@ -82,7 +88,7 @@ pub const NB_TARGET_PER_ZONE: usize = consts::NB_TARGET_PER_ZONE as usize;
 #[cfg(feature = "thresholds")]
 pub use types::{
     DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType,
-    VL53L8CX_NB_THRESHOLDS,
+    VL53L8CX_LAST_THRESHOLD, VL53L8CX_NB_THRESHOLDS,
 };
 
 /// Number of detection thresholds as usize for array sizing.
@@ -96,14 +102,21 @@ pub use bus::{BlockingI2c, BlockingSpi, Spi};
 pub use firmware::{FirmwareSource, PatchedFirmware, SliceFirmware};
 pub use sensor::{detect, Variant};
 
-pub struct Sensor<BUS, D, RST = NoPin, INT = NoPin> {
+/// Driver handle. `LPN`, `INT` and `PWR` are the optional LPn (I2C comms
+/// enable), INT (data ready) and power-enable pins, [`NoPin`] when absent;
+/// the `with_*_pin*` builders set them.
+pub struct Sensor<BUS, D, LPN = NoPin, INT = NoPin, PWR = NoPin> {
     bus: BUS,
     delay: D,
     address: SevenBitAddress,
-    reset_pin: RST,
+    lpn_pin: LPN,
     int_pin: INT,
-    lp_is_reset_high: bool,
+    pwr_pin: PWR,
+    /// `true` when the line in `lpn_pin` is inverted (an inverted LPn or the
+    /// VL53L5CX's I2C_RST attached via the deprecated active-high builder).
+    lpn_inverted: bool,
     int_is_data_ready_high: bool,
+    pwr_active_high: bool,
     stdev: State,
     /// Sensor variant. Defaults to [`Variant::L8`] and is set to the detected
     /// part by [`Sensor::init`].
@@ -112,33 +125,36 @@ pub struct Sensor<BUS, D, RST = NoPin, INT = NoPin> {
 
 // --- Constructors ---
 
-impl<BUS, D> Sensor<BUS, D, NoPin, NoPin>
+impl<BUS, D> Sensor<BUS, D, NoPin, NoPin, NoPin>
 where
     BUS: VlBusAsync,
     D: DelayNs,
 {
     /// Create a driver over `bus` (an `embedded-hal-async` I2C bus, or
     /// [`BlockingI2c`] / [`BlockingSpi`] / [`Spi`] adapters) at
-    /// [`DEFAULT_ADDRESS`] (0x29), with no LPn or INT pin attached. Nothing is
-    /// sent to the sensor until [`Sensor::init`]. Attach pins with the
-    /// `with_*_pin_*` builders and pick another address with
+    /// [`DEFAULT_ADDRESS`] (0x29), with no LPn, INT or power-enable pin
+    /// attached. Nothing is sent to the sensor until [`Sensor::init`]. Attach
+    /// pins with [`Sensor::with_lpn_pin`], the `with_interrupt_pin_*` and
+    /// `with_power_enable_pin_*` builders, and pick another address with
     /// [`Sensor::with_address`].
     pub fn new(bus: BUS, delay: D) -> Self {
         Self {
             bus,
             delay,
             address: DEFAULT_ADDRESS,
-            reset_pin: NoPin,
+            lpn_pin: NoPin,
             int_pin: NoPin,
-            lp_is_reset_high: false,
+            pwr_pin: NoPin,
+            lpn_inverted: false,
             int_is_data_ready_high: false,
+            pwr_active_high: true,
             stdev: State::new(),
             variant: Variant::L8,
         }
     }
 }
 
-impl<SPI, D> Sensor<Spi<SPI>, D, NoPin, NoPin>
+impl<SPI, D> Sensor<Spi<SPI>, D, NoPin, NoPin, NoPin>
 where
     SPI: embedded_hal_async::spi::SpiDevice,
     D: DelayNs,
@@ -147,23 +163,13 @@ where
     /// VL53L8CX's SPI interface; the VL53L5CX is I2C only). Otherwise as
     /// [`Sensor::new`]: no pins attached, nothing sent until [`Sensor::init`].
     pub fn new_spi(spi: SPI, delay: D) -> Self {
-        Self {
-            bus: Spi { spi },
-            delay,
-            address: DEFAULT_ADDRESS,
-            reset_pin: NoPin,
-            int_pin: NoPin,
-            lp_is_reset_high: false,
-            int_is_data_ready_high: false,
-            stdev: State::new(),
-            variant: Variant::L8,
-        }
+        Sensor::new(Spi { spi }, delay)
     }
 }
 
 // --- Builder methods ---
 
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT> {
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR> {
     /// Attach at `address` instead of [`DEFAULT_ADDRESS`], without touching the
     /// sensor. For re-attaching a handle to a sensor previously moved by
     /// [`Sensor::set_i2c_address`]; pair with [`Sensor::redetect`] to skip
@@ -173,144 +179,274 @@ impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT> {
         self
     }
 
-    /// Attach the sensor's **LPn** line (active low), or another line where
-    /// low means "held off".
+    /// Attach the sensor's **LPn** line, which is always active low.
     ///
-    /// Despite its name, LPn is not a reset and has nothing to do with power: it
-    /// is what the datasheet calls the "Comms enable". Low disables the sensor's I2C
-    /// interface, high enables it, and ST's guidance is that its only purpose is
-    /// multi-sensor address assignment: hold every other sensor's LPn low, change
-    /// one sensor's address, then leave LPn high. Pulsing it via
-    /// [`reset`](Self::reset) therefore does **not** reset the sensor or discard
-    /// its firmware; `init()` performs ST's software reboot sequence itself. A
-    /// real reset is a power cycle of the sensor supplies (UM2884 for the
-    /// VL53L5CX, UM3109 for the VL53L8CX).
-    pub fn with_reset_pin_active_low<RstNew>(
-        self,
-        reset_pin: RstNew,
-    ) -> Sensor<BUS, D, RstNew, INT> {
+    /// LPn is what the datasheet calls the "Comms enable": low disables the
+    /// sensor's I2C interface, high enables it. It is not a reset and has
+    /// nothing to do with power. Its purpose is multi-sensor address
+    /// assignment: hold every other sensor's LPn low
+    /// ([`lpn_disable`](Self::lpn_disable)), move one sensor with
+    /// [`Sensor::set_i2c_address`], then release the others
+    /// ([`lpn_enable`](Self::lpn_enable)). Leave it high otherwise; `init()`
+    /// needs it high. When attached, [`power_cycle`](Self::power_cycle) also
+    /// drives it low with the supplies, as UM2884 §4.2 requires. An LPn that
+    /// hangs only on its pull-up to IOVDD needs no GPIO at all. The pin's
+    /// level is not changed here.
+    pub fn with_lpn_pin<LpnNew>(self, lpn_pin: LpnNew) -> Sensor<BUS, D, LpnNew, INT, PWR> {
+        let Sensor { bus, delay, address, int_pin, pwr_pin, int_is_data_ready_high, pwr_active_high, stdev, variant, .. } = self;
         Sensor {
-            bus: self.bus,
-            delay: self.delay,
-            address: self.address,
-            reset_pin,
-            int_pin: self.int_pin,
-            lp_is_reset_high: false,
-            int_is_data_ready_high: self.int_is_data_ready_high,
-            stdev: self.stdev,
-            variant: self.variant,
+            bus,
+            delay,
+            address,
+            lpn_pin,
+            int_pin,
+            pwr_pin,
+            lpn_inverted: false,
+            int_is_data_ready_high,
+            pwr_active_high,
+            stdev,
+            variant,
         }
     }
 
-    /// Attach a line where **high** means "held off" or "reset".
-    ///
-    /// Use this for an inverted LPn (level shifter, transistor) or for the
-    /// VL53L5CX's I2C_RST input, which is active high and resets only the I2C
-    /// interface, not the sensor. [`reset`](Self::reset) drives the pin high for
-    /// 10 ms and releases it. The VL53L8CX has no I2C_RST; its SPI_I2C_N pin
-    /// selects the interface, and toggling it only clears the I2C block.
-    pub fn with_reset_pin_active_high<RstNew>(
-        self,
-        reset_pin: RstNew,
-    ) -> Sensor<BUS, D, RstNew, INT> {
-        Sensor {
-            bus: self.bus,
-            delay: self.delay,
-            address: self.address,
-            reset_pin,
-            int_pin: self.int_pin,
-            lp_is_reset_high: true,
-            int_is_data_ready_high: self.int_is_data_ready_high,
-            stdev: self.stdev,
-            variant: self.variant,
-        }
+    /// Deprecated name of [`with_lpn_pin`](Self::with_lpn_pin): LPn is the I2C
+    /// comms-enable line, not a reset.
+    #[deprecated(
+        since = "0.2.0",
+        note = "LPn is not a reset; use with_lpn_pin(), and power_cycle() for a real reset"
+    )]
+    pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Sensor<BUS, D, RstNew, INT, PWR> {
+        self.with_lpn_pin(reset_pin)
+    }
+
+    /// Deprecated: attach an **inverted** line in the LPn slot (high = held
+    /// off). It was meant for an inverted LPn or for the VL53L5CX's I2C_RST,
+    /// which resets only the I2C interface. The LPn methods and the deprecated
+    /// [`reset`](Self::reset) honour the inversion, so existing code keeps its
+    /// meaning. For I2C_RST use the free [`pulse_i2c_rst`] instead; for an
+    /// inverted LPn use [`with_lpn_pin`](Self::with_lpn_pin) with your own
+    /// inverting `OutputPin`.
+    #[deprecated(
+        since = "0.2.0",
+        note = "attach I2C_RST with pulse_i2c_rst(), or an inverted LPn with with_lpn_pin() plus your own inversion"
+    )]
+    pub fn with_reset_pin_active_high<RstNew>(self, reset_pin: RstNew) -> Sensor<BUS, D, RstNew, INT, PWR> {
+        let mut s = self.with_lpn_pin(reset_pin);
+        s.lpn_inverted = true;
+        s
     }
 
     /// Attach the sensor's INT (data-ready) pin, which goes **low** when a frame
     /// is ready. This is the part's default: INT is an open-drain output pulled
     /// low for the interrupt pulse.
-    pub fn with_interrupt_pin_active_low<IntNew>(
-        self,
-        int_pin: IntNew,
-    ) -> Sensor<BUS, D, RST, IntNew> {
+    pub fn with_interrupt_pin_active_low<IntNew>(self, int_pin: IntNew) -> Sensor<BUS, D, LPN, IntNew, PWR> {
+        let Sensor { bus, delay, address, lpn_pin, pwr_pin, lpn_inverted, pwr_active_high, stdev, variant, .. } = self;
         Sensor {
-            bus: self.bus,
-            delay: self.delay,
-            address: self.address,
-            reset_pin: self.reset_pin,
+            bus,
+            delay,
+            address,
+            lpn_pin,
             int_pin,
-            lp_is_reset_high: self.lp_is_reset_high,
+            pwr_pin,
+            lpn_inverted,
             int_is_data_ready_high: false,
-            stdev: self.stdev,
-            variant: self.variant,
+            pwr_active_high,
+            stdev,
+            variant,
         }
     }
 
     /// Attach a data-ready line that goes **high** when a frame is ready, for
     /// boards that invert the sensor's INT output.
-    pub fn with_interrupt_pin_active_high<IntNew>(
-        self,
-        int_pin: IntNew,
-    ) -> Sensor<BUS, D, RST, IntNew> {
+    pub fn with_interrupt_pin_active_high<IntNew>(self, int_pin: IntNew) -> Sensor<BUS, D, LPN, IntNew, PWR> {
+        let mut s = self.with_interrupt_pin_active_low(int_pin);
+        s.int_is_data_ready_high = true;
+        s
+    }
+
+    /// Attach a power-enable line where **high** powers the sensor (e.g. the
+    /// X-NUCLEO-53L8A1 shield's `PWR_EN`). Enables [`power_on`](Self::power_on),
+    /// [`power_off`](Self::power_off) and [`power_cycle`](Self::power_cycle), the
+    /// only real reset the sensor has. The pin's level is not changed here.
+    pub fn with_power_enable_pin_active_high<PwrNew>(self, pwr_pin: PwrNew) -> Sensor<BUS, D, LPN, INT, PwrNew> {
+        let Sensor { bus, delay, address, lpn_pin, int_pin, lpn_inverted, int_is_data_ready_high, stdev, variant, .. } = self;
         Sensor {
-            bus: self.bus,
-            delay: self.delay,
-            address: self.address,
-            reset_pin: self.reset_pin,
+            bus,
+            delay,
+            address,
+            lpn_pin,
             int_pin,
-            lp_is_reset_high: self.lp_is_reset_high,
-            int_is_data_ready_high: true,
-            stdev: self.stdev,
-            variant: self.variant,
+            pwr_pin,
+            lpn_inverted,
+            int_is_data_ready_high,
+            pwr_active_high: true,
+            stdev,
+            variant,
         }
+    }
+
+    /// Attach a power-enable line where **low** powers the sensor (a P-channel
+    /// high-side switch or an LDO with an active-low enable). Otherwise as
+    /// [`with_power_enable_pin_active_high`](Self::with_power_enable_pin_active_high).
+    pub fn with_power_enable_pin_active_low<PwrNew>(self, pwr_pin: PwrNew) -> Sensor<BUS, D, LPN, INT, PwrNew> {
+        let mut s = self.with_power_enable_pin_active_high(pwr_pin);
+        s.pwr_active_high = false;
+        s
     }
 }
 
-// --- Reset methods (requires OutputPin) ---
+// --- LPn methods (requires OutputPin) ---
 
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
-    D: DelayNs,
-    RST: OutputPin,
-    <RST as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
+    LPN: OutputPin,
 {
-    fn set_reset_state(&mut self, target_state_reset: bool) -> Result<(), Error<BUS::Error>> {
-        let set_pin_high = target_state_reset == self.lp_is_reset_high;
-        let result = if set_pin_high {
-            self.reset_pin.set_high()
+    /// Drive LPn to the logical level `high` (true = comms enabled), honouring
+    /// the deprecated active-high builder's inversion.
+    fn set_lpn_level(&mut self, high: bool) -> Result<(), Error<BUS::Error>> {
+        let result = if high != self.lpn_inverted {
+            self.lpn_pin.set_high()
         } else {
-            self.reset_pin.set_low()
+            self.lpn_pin.set_low()
         };
         result.map_err(|_| Error::Pin)
     }
 
-    /// Pulse the line configured by
-    /// [`with_reset_pin_active_low`](Self::with_reset_pin_active_low) /
-    /// [`with_reset_pin_active_high`](Self::with_reset_pin_active_high): assert
-    /// for 10 ms, then release.
+    /// Drive LPn high: the sensor's I2C interface listens ("Comms enable" in
+    /// the datasheet). This is the resting state; `init()` needs it. Part of
+    /// multi-sensor address assignment, see [`Sensor::set_i2c_address`].
+    pub fn lpn_enable(&mut self) -> Result<(), Error<BUS::Error>> {
+        self.set_lpn_level(true)
+    }
+
+    /// Drive LPn low: the sensor ignores the I2C bus until
+    /// [`lpn_enable`](Self::lpn_enable). Hold every other sensor low while
+    /// moving one with [`Sensor::set_i2c_address`]. This does not reset the
+    /// sensor, drop its firmware or change its power state.
+    pub fn lpn_disable(&mut self) -> Result<(), Error<BUS::Error>> {
+        self.set_lpn_level(false)
+    }
+}
+
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
+where
+    BUS: VlBusAsync,
+    D: DelayNs,
+    LPN: OutputPin,
+{
+    /// Deprecated: pulse the line in the LPn slot (assert for 10 ms, release).
     ///
-    /// What this does depends on the line. On LPn it only disables I2C for 10 ms
-    /// and does not reset the sensor; on the VL53L5CX's I2C_RST it resets the
-    /// I2C interface only. Neither discards the firmware. ST's ULD has no reset
-    /// function either. A real reset is the supply cycle from UM2884 / UM3109:
-    /// drive VDDIO, AVDD and LPn low, wait 10 ms, then drive them high again
-    /// (LPn goes low with the supplies because a digital input must not sit above
-    /// IOVDD while IOVDD is off; if LPn hangs only on its pull-up to IOVDD rather
-    /// than on a GPIO, it follows the rail by itself and needs no driving). `init()`
-    /// then expects the supplies and LPn high and I2C_RST low. Since `init()` always starts with ST's software reboot
-    /// sequence, calling it is sufficient to re-initialise a running sensor.
+    /// On LPn this only disables I2C for 10 ms; on an I2C_RST attached with the
+    /// deprecated active-high builder it resets the I2C interface only. Neither
+    /// resets the sensor or discards its firmware, and ST's ULD has no reset
+    /// function either. The real reset is [`power_cycle`](Self::power_cycle)
+    /// (UM2884 §4.2); to re-initialise a running sensor just call `init()`,
+    /// which always starts with ST's software reboot sequence.
+    #[deprecated(
+        since = "0.2.0",
+        note = "pulsing LPn does not reset the sensor; use power_cycle() or just init()"
+    )]
     pub async fn reset(&mut self) -> Result<(), Error<BUS::Error>> {
-        self.set_reset_state(true)?;
+        self.set_lpn_level(false)?;
         self.delay.delay_ms(10).await;
-        self.set_reset_state(false)?;
+        self.set_lpn_level(true)
+    }
+}
+
+// --- Power methods (requires a power-enable OutputPin) ---
+
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
+where
+    BUS: VlBusAsync,
+    PWR: OutputPin,
+{
+    fn set_power(&mut self, on: bool) -> Result<(), Error<BUS::Error>> {
+        let result = if on == self.pwr_active_high {
+            self.pwr_pin.set_high()
+        } else {
+            self.pwr_pin.set_low()
+        };
+        result.map_err(|_| Error::Pin)
+    }
+
+    /// Cut the sensor's supply via the power-enable pin. The firmware, the
+    /// configuration and any changed I2C address are lost; the sensor restarts
+    /// at [`DEFAULT_ADDRESS`] after [`power_on`](Self::power_on) and needs
+    /// `init()`. If an LPn GPIO is attached, drive it low too
+    /// ([`lpn_disable`](Self::lpn_disable)): a digital input must not sit above
+    /// IOVDD while IOVDD is off.
+    pub fn power_off(&mut self) -> Result<(), Error<BUS::Error>> {
+        self.set_power(false)
+    }
+
+    /// Enable the sensor's supply via the power-enable pin. Allow the rails to
+    /// settle (10 ms is enough on the ST boards), make sure LPn is high and
+    /// I2C_RST low, then `init()`.
+    pub fn power_on(&mut self) -> Result<(), Error<BUS::Error>> {
+        self.set_power(true)
+    }
+}
+
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
+where
+    BUS: VlBusAsync,
+    D: DelayNs,
+    LPN: MaybeOutputPin,
+    PWR: OutputPin,
+{
+    /// Drive LPn (if a GPIO is attached) to the logical level `high`, else no-op.
+    fn set_lpn_level_or_skip(&mut self, high: bool) -> Result<(), Error<BUS::Error>> {
+        if high != self.lpn_inverted {
+            self.lpn_pin.set_high_or_skip()
+        } else {
+            self.lpn_pin.set_low_or_skip()
+        }
+    }
+
+    /// Power-cycle the sensor: the only real reset it has (ST's ULD has none).
+    ///
+    /// Implements the sensor reset procedure of UM2884 §4.2 (VL53L5CX) / UM3109
+    /// (VL53L8CX): drive the supplies and LPn low, wait 10 ms, drive them high.
+    /// Concretely: [`power_off`](Self::power_off); LPn low if a GPIO is attached
+    /// (an LPn on its IOVDD pull-up follows the rail by itself); 10 ms;
+    /// [`power_on`](Self::power_on), then LPn high; then 10 ms for the supplies
+    /// to settle. Boards with slow supplies may need a longer settle: add your
+    /// own delay before `init()`. Afterwards the firmware is gone and the sensor
+    /// answers at [`DEFAULT_ADDRESS`], so follow with [`Sensor::init`] (and
+    /// `with_address`/`set_i2c_address` again if you had moved it). Compiles
+    /// with or without an LPn pin via [`MaybeOutputPin`].
+    pub async fn power_cycle(&mut self) -> Result<(), Error<BUS::Error>> {
+        self.set_power(false)?;
+        self.set_lpn_level_or_skip(false)?;
+        self.delay.delay_ms(10).await;
+        self.set_power(true)?;
+        self.set_lpn_level_or_skip(true)?;
+        self.delay.delay_ms(10).await;
         Ok(())
     }
 }
 
+/// Pulse the VL53L5CX's **I2C_RST** input: high for 10 ms, then low.
+///
+/// I2C_RST (active high, internal pull-down) resets the sensor's I2C interface
+/// only, when toggled 0 -> 1 -> 0; it does not reset the sensor, drop its
+/// firmware or change its address. Use it to recover a hung I2C block; `init()`
+/// expects the line low. The VL53L8CX has no I2C_RST: its SPI_I2C_N pin selects
+/// the interface and toggling it likewise only clears the I2C block. A real
+/// reset is [`Sensor::power_cycle`]. Fails with `Error::Pin` on a pin error.
+pub async fn pulse_i2c_rst<P: OutputPin, D: DelayNs>(
+    pin: &mut P,
+    delay: &mut D,
+) -> Result<(), Error<core::convert::Infallible>> {
+    pin.set_high().map_err(|_| Error::Pin)?;
+    delay.delay_ms(10).await;
+    pin.set_low().map_err(|_| Error::Pin)
+}
+
 // --- Interrupt-based data ready (requires Wait) ---
 
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
     INT: Wait,
@@ -327,7 +463,7 @@ where
     }
 }
 
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -343,7 +479,7 @@ where
 
 // --- Blocking interrupt data ready (requires InputPin) ---
 
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
     INT: InputPin,
@@ -363,7 +499,7 @@ where
 
 // --- Core async methods ---
 
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -423,9 +559,10 @@ where
     /// Move the sensor to `new_address` (7-bit) and use it for all further
     /// traffic. With several sensors on one bus, hold every other sensor's LPn
     /// low while calling this so only the target sensor hears the command, then
-    /// release them ([`Sensor::with_reset_pin_active_low`]). It is a register
-    /// write, not a firmware command, so it works before [`Sensor::init`] as in
-    /// ST's multi-sensor example. The address is not retained: a power cycle
+    /// release them ([`Sensor::with_lpn_pin`], [`Sensor::lpn_disable`] /
+    /// [`Sensor::lpn_enable`]). It is a register write, not a firmware
+    /// command, so it works before [`Sensor::init`] as in ST's multi-sensor
+    /// example, and needs no pin on this handle. The address is not retained: a power cycle
     /// returns the sensor to [`DEFAULT_ADDRESS`]. The value is not validated.
     pub async fn set_i2c_address(&mut self, new_address: SevenBitAddress) -> Result<(), Error<BUS::Error>> {
         ops::set_i2c_address(&mut self.bus, self.address, new_address).await?;
@@ -918,7 +1055,7 @@ where
 // --- Detection thresholds (requires "thresholds" feature) ---
 
 #[cfg(feature = "thresholds")]
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -1066,9 +1203,13 @@ where
     /// (mm, kcps/SPAD, ...); the driver applies the firmware's fixed-point scaling.
     /// Three layouts: 4x4 with one entry per zone (16 used), 4x4 with two per
     /// zone (32; `mathematic_operation` combines the pair), or 8x8 with one per
-    /// zone (64). ST's header says to OR `VL53L8CX_LAST_THRESHOLD` (128) into
-    /// the `zone_num` of the last entry used; leave unused entries zero. Then
-    /// enable with [`Sensor::set_detection_thresholds_enable`] before ranging.
+    /// zone (64). ST's header requires the caller to OR
+    /// [`VL53L8CX_LAST_THRESHOLD`] (128) into the `zone_num` of the last entry
+    /// used (`zone_num: 15 | VL53L8CX_LAST_THRESHOLD`) and to leave unused
+    /// entries zero; the array is sent exactly as given, byte-identical to ST's
+    /// ULD, so a missing flag is not detected and the readback returns it as
+    /// written. Then enable with [`Sensor::set_detection_thresholds_enable`]
+    /// before ranging.
     pub async fn set_detection_thresholds(
         &mut self,
         mut thresholds: [DetectionThreshold; NB_THRESHOLDS],
@@ -1097,7 +1238,7 @@ where
 // --- Motion indicator (requires "motion" or "thresholds" feature) ---
 
 #[cfg(any(feature = "motion", feature = "thresholds"))]
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
     D: DelayNs,
@@ -1134,9 +1275,10 @@ where
     }
 
     /// Set the distance window the motion indicator watches, in mm, and send the
-    /// updated `motion_config`. Requires `min >= 400`, `max <= 4000` and
-    /// `max - min <= 1500`; otherwise returns
-    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus.
+    /// updated `motion_config`. Requires `min <= max`, `min >= 400`,
+    /// `max <= 4000` and `max - min <= 1500`; otherwise returns
+    /// `Error::Firmware(FirmwareError::InvalidParam)` without touching the bus
+    /// (ST's ULD lets `max < min` through and computes garbage).
     /// Default window 400..=1500 mm. Sensitivity also depends on integration
     /// time, distance and target reflectance. Not while ranging.
     pub async fn motion_indicator_set_distance_motion(
@@ -1145,9 +1287,12 @@ where
         distance_min_mm: u16,
         distance_max_mm: u16,
     ) -> Result<(), Error<BUS::Error>> {
-        if (distance_max_mm - distance_min_mm) > 1500
+        // Check the order first: the u16 subtraction below would overflow
+        // (and panic in debug builds) for max < min.
+        if distance_min_mm > distance_max_mm
             || distance_min_mm < 400
             || distance_max_mm > 4000
+            || (distance_max_mm - distance_min_mm) > 1500
         {
             return Err(Error::Firmware(FirmwareError::InvalidParam));
         }
@@ -1213,7 +1358,7 @@ where
 // --- Xtalk (requires "xtalk" feature) ---
 
 #[cfg(feature = "xtalk")]
-impl<BUS, D, RST, INT> Sensor<BUS, D, RST, INT>
+impl<BUS, D, LPN, INT, PWR> Sensor<BUS, D, LPN, INT, PWR>
 where
     BUS: VlBusAsync,
     D: DelayNs,

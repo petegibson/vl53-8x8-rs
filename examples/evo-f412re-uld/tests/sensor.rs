@@ -23,7 +23,7 @@ use vl53l5cx_uld::{
 #[cfg(feature = "thresholds")]
 use vl53l5cx_uld::{
     DetectionThreshold, MotionConfiguration, ThresholdMeasurement, ThresholdOperation,
-    ThresholdType,
+    ThresholdType, VL53L8CX_LAST_THRESHOLD,
 };
 
 use evo_f412re_uld::{Sensor, SYSCLK_HZ};
@@ -263,15 +263,16 @@ mod tests {
         sensor.stop_ranging().unwrap();
     }
 
-    /// `reset()` pulses I2C_RESET (PB8) for 10 ms; the sensor must come back
-    /// at the default address and accept a fresh firmware upload.
+    /// `power_cycle()` drops the rail through PWR_EN (PD2) for 10 ms, UM2884
+    /// §4.2; the sensor must come back at the default address with its firmware
+    /// gone and accept a fresh upload.
     #[test]
     #[timeout(20)]
-    fn test_reinit_after_reset(mut sensor: Sensor) {
+    fn test_reinit_after_power_cycle(mut sensor: Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res8x8).unwrap();
 
-        sensor.reset().unwrap();
+        sensor.power_cycle().unwrap();
         cortex_m::asm::delay(CYCLES_PER_MS * 100);
         sensor.init().unwrap();
 
@@ -325,9 +326,11 @@ mod tests {
 
         let mut thresholds: [DetectionThreshold; 64] = unsafe { core::mem::zeroed() };
 
-        // Configure zone 0: trigger when distance < 500 mm
+        // Configure zone 0: trigger when distance < 500 mm. It is the only
+        // (hence last) entry, so ST's header requires VL53L8CX_LAST_THRESHOLD
+        // OR'd into its zone_num.
         thresholds[0] = DetectionThreshold {
-            zone_num: 0,
+            zone_num: 0 | VL53L8CX_LAST_THRESHOLD,
             measurement: ThresholdMeasurement::DistanceMm,
             threshold_type: ThresholdType::LessThanEqualMin,
             low_threshold: 500,
@@ -338,7 +341,7 @@ mod tests {
         sensor.set_detection_thresholds(thresholds).unwrap();
         let readback = sensor.get_detection_thresholds().unwrap();
 
-        defmt::assert_eq!(readback[0].zone_num, 0);
+        defmt::assert_eq!(readback[0].zone_num & !VL53L8CX_LAST_THRESHOLD, 0);
         defmt::assert_eq!(readback[0].low_threshold, 500);
     }
 

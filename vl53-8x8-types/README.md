@@ -1,6 +1,6 @@
 # vl53-8x8-types
 
-Shared, dependency-free types for the Rust drivers of the STMicroelectronics
+Shared types for the Rust drivers of the STMicroelectronics
 **VL53L5CX** and **VL53L8CX** 8x8 multizone Time-of-Flight sensors.
 
 This crate exists so that the two driver crates in the family agree on one
@@ -8,7 +8,7 @@ set of enums, status codes and one error type:
 
 | Crate              | Role                                                       |
 | ------------------ | ---------------------------------------------------------- |
-| `vl53-8x8-types`   | this crate: enums, constants, `Error`; `no_std`, zero deps |
+| `vl53-8x8-types`   | this crate: enums, constants, `Error`; `no_std`           |
 | `vl53-8x8`         | pure-Rust async driver for VL53L5CX and VL53L8CX           |
 | `vl53l8cx-uld-sys` | bindgen + cc over ST's VL53L8CX ULD C sources              |
 | `vl53l8cx-uld`     | safe blocking wrapper over `vl53l8cx-uld-sys`              |
@@ -23,7 +23,10 @@ driver's values (e.g. a shared `Error` handler or a configuration struct).
 - `Error<E>` (bus, `NotAlive`, `UnknownRevision`, `Firmware`, `Pin`) with
   `core::fmt::Display` and `core::error::Error` impls, and `FirmwareError`
   decoded from the ULD status codes.
-- `NoPin`, the placeholder for an absent reset/interrupt pin.
+- `NoPin`, the placeholder for an absent LPn / INT / power-enable pin, and
+  `MaybeOutputPin`, implemented by every `embedded-hal` `OutputPin` and (as a
+  no-op) by `NoPin`, so driver methods such as `power_cycle()` compile with
+  or without an LPn pin attached.
 - `DEFAULT_ADDRESS` (7-bit, `0x29`) and the ULD's `VL53L8CX_*` status,
   resolution, ranging-mode and power-mode constants.
 - Behind feature flags: the ULD plugin types `MotionConfiguration`,
@@ -58,7 +61,8 @@ belong to the matching ULD plugin, and the driver crates forward them.
 | `motion`     | `MotionConfiguration`                                        |
 | `thresholds` | `DetectionThreshold`, `Threshold*` enums, `thresholds` consts |
 
-`no_std`, no build script, no dependencies. Requires Rust 1.81 or later
+`no_std`, no build script; the only dependency is `embedded-hal` 1.0 (for the
+`OutputPin` bound of `MaybeOutputPin`). Requires Rust 1.81 or later
 (`core::error::Error`).
 
 ## License

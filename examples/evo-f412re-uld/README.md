@@ -38,7 +38,7 @@ driver detect the part, use the Embassy sibling.
 | SCL         | PB6 | AF4, open drain, internal pull-up                         |
 | SDA         | PB7 | AF4, open drain, internal pull-up                         |
 | PWR_EN      | PD2 | active **low** (low = sensor rail on)                     |
-| I2C_RESET   | PB8 | active **high**; the sensors' I2C_RST (I2C interface reset) |
+| I2C_RESET   | PB8 | active **high**; the sensors' I2C_RST (I2C interface reset only) |
 | LPn (2nd)   | PB9 | gates the optional second sensor; held **low**            |
 
 Clock: HSE 8 MHz crystal -> PLL -> 96 MHz SYSCLK, 48 MHz APB1 (I2C1), 96 MHz
@@ -48,10 +48,12 @@ demo runs this board at 1 MHz, so this one does too; `I2C_FREQ_HZ` in
 
 The board can carry two sensors on one bus; only the always-on sensor is used
 and answers at the default 7-bit address 0x29. PB9 is held low so the second
-position stays off the bus. The always-on sensor's LPn is not on a GPIO, so
-its reset is the power/I2C_RESET sequence in `board_init`: rail off and reset
-asserted for 500 ms, rail on, 100 ms, reset released, 1 ms. `Sensor::reset()`
-pulses I2C_RESET for 10 ms (as the Embassy demo's recovery step does).
+position stays off the bus. The always-on sensor's LPn is not on a GPIO (it
+follows IOVDD), so the bring-up in `board_init` is: rail off for 500 ms, rail
+on, 100 ms, then `vl53l5cx_uld::pulse_i2c_rst` toggles I2C_RESET high for
+10 ms (I2C interface reset only), 1 ms. PWR_EN is attached to the driver as an
+active-low power-enable pin, so `Sensor::power_cycle()` (rail and LPn low for
+10 ms, UM2884 §4.2) is the real reset; `set_i2c_address` needs no pin.
 
 ## Run
 
@@ -78,7 +80,7 @@ Common to both ST ULDs: `test_sensor_alive`, `test_init`,
 `test_set_resolution`, `test_ranging_4x4`, `test_ranging_8x8`,
 `test_ambient_light`, `test_ranging_frequency`, `test_target_order`,
 `test_ranging_mode`, `test_integration_time`, `test_sharpener_percent`,
-`test_set_resolution_while_ranging`, `test_reinit_after_reset`,
+`test_set_resolution_while_ranging`, `test_reinit_after_power_cycle`,
 `test_vhv_repeat_count`, `test_set_address`.
 
 VL53L5CX-specific: `test_power_mode` covers Sleep/Wakeup and checks that

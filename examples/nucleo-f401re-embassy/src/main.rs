@@ -63,7 +63,7 @@ async fn main(_spawner: Spawner) {
     let mut pwr_en_c = Output::new(p.PA7, Level::Low, Speed::Low); // PWR_EN_C
     let lp_c = Output::new(p.PB0, Level::Low, Speed::Low);         // LPn center
 
-    // --- Power-up sequence ---
+    // --- Power-up sequence (board bring-up; `power_cycle()` below does the same) ---
     pwr_en_c.set_low();
     cortex_m::asm::delay(84_000 * 50);
     pwr_en_c.set_high();
@@ -86,7 +86,8 @@ async fn main(_spawner: Spawner) {
         );
 
         Sensor::new(vl53_8x8::BlockingI2c(i2c), Delay)
-            .with_reset_pin_active_low(lp_c)
+            .with_lpn_pin(lp_c)
+            .with_power_enable_pin_active_high(pwr_en_c)
     };
 
     // --- I2C mode with async DMA ---
@@ -105,7 +106,8 @@ async fn main(_spawner: Spawner) {
         );
 
         Sensor::new(i2c, Delay)
-            .with_reset_pin_active_low(lp_c)
+            .with_lpn_pin(lp_c)
+            .with_power_enable_pin_active_high(pwr_en_c)
     };
 
     // --- SPI mode ---
@@ -138,10 +140,13 @@ async fn main(_spawner: Spawner) {
         let spi_device = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
 
         Sensor::new_spi(spi_device, Delay)
-            .with_reset_pin_active_low(lp_c)
+            .with_lpn_pin(lp_c)
+            .with_power_enable_pin_active_high(pwr_en_c)
     };
 
-    sensor.reset().await.unwrap();
+    // UM2884 §4.2 reset: PWR_EN and LPn low, 10 ms, high (leaves LPn high =
+    // I2C enabled). 100 ms extra margin before the firmware upload.
+    sensor.power_cycle().await.unwrap();
     cortex_m::asm::delay(84_000 * 100);
 
     defmt::info!("Initialising sensor...");

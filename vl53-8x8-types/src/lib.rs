@@ -6,7 +6,8 @@ multizone Time-of-Flight sensor drivers.
 This crate holds the hand-written Rust types and constants that are common to
 the pure-Rust driver and the ST ULD wrapper: the error type, the configuration
 enums, the plugin (xtalk / motion / detection-threshold) types and the ULD
-status codes. It has no dependencies and no build script.
+status codes. Its only dependency is `embedded-hal` 1.0, for the pin trait
+behind [`MaybeOutputPin`]; it has no build script.
 */
 
 // --- Status Codes ---
@@ -101,8 +102,53 @@ pub const VL53L8CX_GET_XTALK_CMD: [u8; 72] = [
     0x00, 0x00, 0x00, 0x0F, 0x07, 0x02, 0x00, 0x44,
 ];
 
-/// A placeholder type for an unconfigured hardware pin.
+/// A placeholder type for an unconfigured hardware pin (LPn, INT or power
+/// enable). It implements [`MaybeOutputPin`] as a no-op so driver methods that
+/// optionally touch a pin (e.g. `power_cycle()` driving LPn) compile with or
+/// without one attached.
 pub struct NoPin;
+
+mod private {
+    pub trait Sealed {}
+    impl Sealed for super::NoPin {}
+    impl<T: embedded_hal::digital::OutputPin> Sealed for T {}
+}
+
+/// An output pin that may be absent: implemented by every
+/// `embedded_hal::digital::OutputPin` (drives the pin) and by [`NoPin`]
+/// (does nothing). Drivers use it for the LPn slot in `power_cycle()`, which
+/// per UM2884 §4.2 drives LPn low with the supplies when a GPIO holds it and
+/// leaves it alone otherwise. Sealed: not implementable outside this crate.
+pub trait MaybeOutputPin: private::Sealed {
+    /// `true` for a real pin, `false` for [`NoPin`].
+    const PRESENT: bool;
+    /// Drive the pin high, or do nothing for [`NoPin`]. A pin error becomes
+    /// [`Error::Pin`].
+    fn set_high_or_skip<E>(&mut self) -> Result<(), Error<E>>;
+    /// Drive the pin low, or do nothing for [`NoPin`]. A pin error becomes
+    /// [`Error::Pin`].
+    fn set_low_or_skip<E>(&mut self) -> Result<(), Error<E>>;
+}
+
+impl MaybeOutputPin for NoPin {
+    const PRESENT: bool = false;
+    fn set_high_or_skip<E>(&mut self) -> Result<(), Error<E>> {
+        Ok(())
+    }
+    fn set_low_or_skip<E>(&mut self) -> Result<(), Error<E>> {
+        Ok(())
+    }
+}
+
+impl<T: embedded_hal::digital::OutputPin> MaybeOutputPin for T {
+    const PRESENT: bool = true;
+    fn set_high_or_skip<E>(&mut self) -> Result<(), Error<E>> {
+        self.set_high().map_err(|_| Error::Pin)
+    }
+    fn set_low_or_skip<E>(&mut self) -> Result<(), Error<E>> {
+        self.set_low().map_err(|_| Error::Pin)
+    }
+}
 
 /// Zone grid resolution. Default after `init()` is [`Resolution::Res4x4`].
 /// Set it before the ranging frequency, whose allowed range depends on it.
@@ -225,9 +271,11 @@ pub enum ThresholdOperation {
 /// `set_detection_thresholds` takes 64 of these. Three configurations are
 /// supported: 4x4 with one threshold per zone (16 entries used), 4x4 with
 /// two per zone (32 entries; `mathematic_operation` combines each pair), or
-/// 8x8 with one per zone (64 entries). ST's header says to OR
+/// 8x8 with one per zone (64 entries). ST's header requires the caller to OR
 /// [`VL53L8CX_LAST_THRESHOLD`] (128) into the `zone_num` of the last entry
-/// used and to leave the rest zero.
+/// used (e.g. `zone_num: 15 | VL53L8CX_LAST_THRESHOLD`) and to leave the rest
+/// zero; the drivers pass the array through unchanged, so a missing flag is
+/// not detected.
 #[cfg(feature = "thresholds")]
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -241,8 +289,9 @@ pub struct DetectionThreshold {
     pub measurement: ThresholdMeasurement,
     /// How the value is compared with the bounds.
     pub threshold_type: ThresholdType,
-    /// Zone this entry applies to (0..16 in 4x4, 0..64 in 8x8); OR in
-    /// [`VL53L8CX_LAST_THRESHOLD`] on the last entry used.
+    /// Zone this entry applies to (0..16 in 4x4, 0..64 in 8x8). The caller
+    /// must OR in [`VL53L8CX_LAST_THRESHOLD`] (128) on the last entry used;
+    /// a readback returns the flag as written.
     pub zone_num: u8,
     /// Combination with the next entry; only applies to the 4x4
     /// two-per-zone configuration.

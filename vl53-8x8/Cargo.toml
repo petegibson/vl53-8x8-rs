@@ -1,6 +1,6 @@
 [package]
 name = "vl53-8x8"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
@@ -15,7 +15,7 @@ categories = ["embedded", "no-std", "hardware-support"]
 features = ["xtalk", "motion", "thresholds"]
 
 [dependencies]
-vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.0" }
+vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.1" }
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 defmt = { version = "1", optional = true }

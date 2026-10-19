@@ -31,7 +31,7 @@ vl53l8cx_uld::bind_platform_driver_spi!(MockSpi, MockDelay);
 
 // --- C ULD wrapper adapter ----------------------------------------------------
 
-type CSensor = vl53l8cx_uld::Vl53l8cx<vl53l8cx_uld::Vl53l8cxSpiDevice<MockSpi>, MockDelay, MockPin, MockPin>;
+type CSensor = vl53l8cx_uld::Vl53l8cx<vl53l8cx_uld::Vl53l8cxSpiDevice<MockSpi>, MockDelay, MockPin, MockPin, MockPin>;
 type CError = vl53l8cx_uld::Error<core::convert::Infallible>;
 
 struct CDriver {
@@ -42,8 +42,9 @@ struct CDriver {
 impl CDriver {
     fn new(spi: MockSpi, delay: MockDelay) -> Self {
         let sensor = vl53l8cx_uld::Vl53l8cx::new_spi(spi, delay)
-            .with_reset_pin_active_low(MockPin)
-            .with_interrupt_pin_active_low(MockPin);
+            .with_lpn_pin(MockPin)
+            .with_interrupt_pin_active_low(MockPin)
+            .with_power_enable_pin_active_high(MockPin);
         CDriver { sensor, motion: unsafe { core::mem::zeroed() } }
     }
 }
@@ -57,8 +58,8 @@ impl Driver for CDriver {
     fn init(&mut self) -> Result<(), CError> {
         self.sensor.init()
     }
-    fn reset(&mut self) -> Result<(), CError> {
-        self.sensor.reset()
+    fn power_cycle(&mut self) -> Result<(), CError> {
+        self.sensor.power_cycle()
     }
     fn set_resolution(&mut self, r: Resolution) -> Result<(), CError> {
         self.sensor.set_resolution(r)
@@ -253,28 +254,33 @@ fn check(which: Which, test: &str, model_from: &Recording, expected_from: &Recor
     }
 }
 
-/// `seq_tests! { name, name2 [ignore = "reason"], ... }` makes one module per
-/// on-target test with the three checks. An `ignore` marks the differential
-/// check (b) as a known divergence; see KNOWN_DIVERGENCES.md.
+/// `seq_tests! { name, name2 [ignore = "reason"], name3 [ignore_all = "reason"], ... }`
+/// makes one module per on-target test with the three checks. An `ignore`
+/// marks the differential check (b) as a known divergence (see
+/// KNOWN_DIVERGENCES.md); `ignore_all` skips all three checks, for a sequence
+/// whose recordings are stale and must be re-taken on hardware.
 macro_rules! seq_tests {
-    ($($name:ident $([ignore = $reason:literal])?),* $(,)?) => {
+    ($($name:ident $([ignore = $reason:literal])? $([ignore_all = $reason_all:literal])?),* $(,)?) => {
         $(
             mod $name {
                 use super::*;
                 const TEST: &str = stringify!($name);
 
                 #[test]
+                $(#[ignore = $reason_all])?
                 fn a_c_driver_replays_c_recording() {
                     check(Which::C, TEST, Recording::c_uld(), Recording::c_uld());
                 }
 
                 #[test]
                 $(#[ignore = $reason])?
+                $(#[ignore = $reason_all])?
                 fn b_rust_driver_matches_c_recording() {
                     check(Which::Rust, TEST, Recording::c_uld(), Recording::c_uld());
                 }
 
                 #[test]
+                $(#[ignore = $reason_all])?
                 fn c_rust_driver_replays_rust_recording() {
                     check(Which::Rust, TEST, Recording::rust(), Recording::rust());
                 }
@@ -314,7 +320,10 @@ seq_tests! {
     test_wait_for_data_ready_blocking,
     test_detection_thresholds_enable,
     test_detection_thresholds_auto_stop,
-    test_detection_thresholds,
+    // 0.2.0: the sequence now sets VL53L8CX_LAST_THRESHOLD on its (single, hence
+    // last) entry as ST's header requires; both recordings were taken without
+    // it and differ in that one byte. Re-record on the Nucleo, then drop this.
+    test_detection_thresholds [ignore_all = "re-record pending: LAST_THRESHOLD now set"],
     test_motion_indicator_init,
     test_motion_indicator_set_distance,
     test_motion_indicator_set_resolution,

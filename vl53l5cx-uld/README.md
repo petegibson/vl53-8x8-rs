@@ -7,7 +7,8 @@ The ranging logic, register sequences and firmware image are ST's, compiled
 and bound by `vl53l5cx-uld-sys`; this crate adds the Rust API, the platform
 callbacks the ULD needs, and typed errors. It is the VL53L5CX twin of
 [`vl53l8cx-uld`](../vl53l8cx-uld) and deliberately has the same API shape:
-`Vl53l5cx::new` / `new_spi`, `with_reset_pin_*`, `with_interrupt_pin_*`, the
+`Vl53l5cx::new` / `new_spi`, `with_lpn_pin`, `with_interrupt_pin_*`,
+`with_power_enable_pin_*`, `power_cycle`, `pulse_i2c_rst`, the
 same method names, the same `Error` type from `vl53-8x8-types`, and the same
 `bind_platform_driver!` / `bind_platform_driver_spi!` macros (defining the
 `vl53l5cx_platform_*` symbols).
@@ -59,10 +60,12 @@ vl53l5cx_uld::bind_platform_driver!(MyI2c, MyDelay);
 // SPI instead:  vl53l5cx_uld::bind_platform_driver_spi!(MySpiDevice, MyDelay);
 
 let mut sensor = Vl53l5cx::new(i2c, delay)         // or Vl53l5cx::new_spi(spi_device, delay)
-    .with_reset_pin_active_low(lpn)                 // optional
-    .with_interrupt_pin_active_low(int);            // optional
-sensor.reset()?;
+    .with_lpn_pin(lpn)                              // optional: LPn, I2C comms enable (active low)
+    .with_interrupt_pin_active_low(int)             // optional
+    .with_power_enable_pin_active_low(pwr_en);      // optional: enables power_cycle(), the real reset
+sensor.power_cycle()?;                              // optional; init() reboots the firmware anyway
 sensor.init()?;                                     // is_alive probe + ~86 KB firmware upload
+// vl53l5cx_uld::pulse_i2c_rst(&mut i2c_rst, &mut delay)?  resets the I2C interface only
 sensor.set_resolution(Resolution::Res4x4)?;
 sensor.start_ranging()?;
 while !sensor.check_data_ready()? {}

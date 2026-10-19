@@ -45,8 +45,10 @@ bus logging (raise `DEFMT_LOG` in `.cargo/config.toml` to see it).
 The X-NUCLEO-53L8A1 selects the bus with its solder/jumper straps; set them
 for the bus you build for. In I2C mode the firmware also drives the shield's
 I2C_RST line (PB3) low, which is required for the sensor's I2C interface; in
-SPI mode PB3 is SPI1 SCK. The centre sensor's LPn (PB0) is used as the active
-low reset; PWR_EN_C (PA7) is cycled at boot like in the other Nucleo demos.
+SPI mode PB3 is SPI1 SCK. The centre sensor's LPn (PB0, I2C comms enable) and
+PWR_EN_C (PA7) are attached to the driver; the `ranging` task power-cycles the
+sensor through them (`power_cycle()`, the sensor's only real reset) before the
+firmware upload, as in the other Nucleo demos.
 
 ## Expected log
 

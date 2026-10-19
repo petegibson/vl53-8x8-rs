@@ -34,15 +34,16 @@ part is available from `Sensor::variant()` after `init`.
 ## Usage
 
 Construct from an async I2C bus (or an `SpiDevice` via `Sensor::new_spi`)
-and a `DelayNs`, optionally attach LPn and INT pins, then `init` uploads the
-firmware. Every call returns `Result<_, Error<BusError>>`.
+and a `DelayNs`, optionally attach the LPn, INT and power-enable pins, then
+`init` uploads the firmware. Every call returns `Result<_, Error<BusError>>`.
 
 ```rust,ignore
 use vl53_8x8::{Resolution, Sensor};
 
 let mut sensor = Sensor::new(i2c, delay)          // or Sensor::new_spi(spi_device, delay)
-    .with_reset_pin_active_low(lpn);               // optional
-sensor.reset().await?;
+    .with_lpn_pin(lpn)                             // optional: LPn, the I2C comms enable (active low)
+    .with_power_enable_pin_active_high(pwr_en);    // optional: PWR_EN, enables power_cycle()
+sensor.power_cycle().await?;                       // optional: the only real reset (UM2884 §4.2)
 sensor.init().await?;                              // detect variant, upload ~86 KB firmware
 defmt::info!("found {:?}", sensor.variant());
 
@@ -57,6 +58,17 @@ loop {
 }
 ```
 
+- Pins. `with_lpn_pin` attaches **LPn**, the datasheet's "Comms enable": low
+  disables the sensor's I2C interface, high enables it. It is not a reset and
+  not a power control; its job is multi-sensor address assignment
+  (`lpn_disable` the others, `set_i2c_address` one, `lpn_enable` the rest;
+  `set_i2c_address` itself needs no pin). `with_power_enable_pin_active_high`
+  / `_low` attaches a supply switch such as the X-NUCLEO-53L8A1's `PWR_EN`;
+  `power_cycle()` then performs the UM2884 §4.2 reset (supplies and LPn low,
+  10 ms, high), the sensor's only real reset. `pulse_i2c_rst(&mut pin, &mut
+  delay)` toggles the VL53L5CX's I2C_RST, which resets the I2C interface
+  only. Plain `init()` re-initialises a running sensor without any pin. The
+  0.1 `with_reset_pin_*` / `reset()` API still compiles but is deprecated.
 - A blocking `embedded_hal::i2c::I2c` can be used through the `BlockingI2c`
   wrapper (for HALs that only offer blocking I2C), and a blocking
   `embedded_hal::spi::SpiDevice` through `BlockingSpi`. Both speak the same

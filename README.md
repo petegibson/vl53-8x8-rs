@@ -65,16 +65,17 @@ Add the driver you want to `Cargo.toml`:
 
 ```toml
 [dependencies]
-vl53-8x8 = "0.1"            # pure Rust, async, L5CX + L8CX
+vl53-8x8 = "0.2"            # pure Rust, async, L5CX + L8CX
 # or
-vl53l8cx-uld = "0.1"        # blocking wrapper over ST's VL53L8CX ULD (needs libclang)
+vl53l8cx-uld = "0.2"        # blocking wrapper over ST's VL53L8CX ULD (needs libclang)
 ```
 
 Both drivers follow the same shape: construct from a bus and a delay,
-optionally attach the LPn line (I2C enable, needed for multi-sensor address
-assignment) and the INT pin, call `init()` to upload the
-firmware, then configure and range. Every call returns
-`Result<_, Error<BusError>>`.
+optionally attach the LPn line (`with_lpn_pin`: the sensor's I2C comms enable,
+needed for multi-sensor address assignment, not a reset), the INT pin and a
+power-enable line (`with_power_enable_pin_active_high/low`: `power_cycle()` is
+the sensor's only real reset), call `init()` to upload the firmware, then
+configure and range. Every call returns `Result<_, Error<BusError>>`.
 
 ### Async, pure Rust (`vl53-8x8`)
 
@@ -82,8 +83,9 @@ firmware, then configure and range. Every call returns
 use vl53_8x8::{Resolution, Sensor};
 
 let mut sensor = Sensor::new(i2c, delay)            // or Sensor::new_spi(spi_device, delay)
-    .with_reset_pin_active_low(lpn);
-sensor.reset().await?;
+    .with_lpn_pin(lpn)                               // optional: LPn, I2C comms enable (active low)
+    .with_power_enable_pin_active_high(pwr_en);      // optional: PWR_EN, enables power_cycle()
+sensor.power_cycle().await?;                         // optional real reset (UM2884 §4.2); init() reboots anyway
 sensor.init().await?;                                // detects L5CX vs L8CX, uploads patched firmware
 defmt::info!("variant: {:?}", sensor.variant());
 
@@ -108,9 +110,10 @@ use vl53l8cx_uld::{Resolution, Vl53l8cx};
 vl53l8cx_uld::bind_platform_driver!(MyI2c, MyDelay); // once per binary; `_spi!` variant for SPI
 
 let mut sensor = Vl53l8cx::new(i2c, delay)           // or Vl53l8cx::new_spi(spi_device, delay)
-    .with_reset_pin_active_low(lpn)
-    .with_interrupt_pin_active_low(int);
-sensor.reset()?;
+    .with_lpn_pin(lpn)                               // optional
+    .with_interrupt_pin_active_low(int)              // optional
+    .with_power_enable_pin_active_high(pwr_en);      // optional
+sensor.power_cycle()?;                               // optional real reset; init() reboots anyway
 sensor.init()?;
 
 sensor.set_resolution(Resolution::Res4x4)?;

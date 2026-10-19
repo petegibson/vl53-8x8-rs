@@ -23,7 +23,7 @@
 use embedded_hal::delay::DelayNs;
 use stm32f4xx_hal::gpio::{Output, Pin, PinState};
 use stm32f4xx_hal::{pac, prelude::*};
-use vl53l5cx_uld::Vl53l5cx;
+use vl53l5cx_uld::{pulse_i2c_rst, NoPin, Vl53l5cx};
 
 /// Core clock after `board_init`; handy for `cortex_m::asm::delay` budgets.
 pub const SYSCLK_HZ: u32 = 96_000_000;
@@ -34,24 +34,31 @@ pub const I2C_FREQ_HZ: u32 = 1_000_000;
 
 pub type SensorI2c = stm32f4xx_hal::i2c::I2c<pac::I2C1>;
 pub type SensorDelay = stm32f4xx_hal::timer::SysDelay;
+/// PWR_EN (PD2, active low) switches the sensor rail; attached as the driver's
+/// power-enable pin so `Sensor::power_cycle()` (the only real reset) works.
+pub type SensorPowerPin = Pin<'D', 2, Output>;
 /// I2C_RESET (PB8, active high) is the sensors' I2C_RST input: it resets the
-/// I2C interface only, not the sensor. It is attached as the driver's "reset"
-/// line so `Sensor::reset` and `Sensor::set_i2c_address` are available.
-pub type SensorResetPin = Pin<'B', 8, Output>;
+/// I2C interface only, not the sensor. `board_init` pulses it once with
+/// `vl53l5cx_uld::pulse_i2c_rst` after the rail is up and then leaves it low.
+pub type I2cResetPin = Pin<'B', 8, Output>;
 
 vl53l5cx_uld::bind_platform_driver!(SensorI2c, SensorDelay);
 
-pub type Sensor = Vl53l5cx<SensorI2c, SensorDelay, SensorResetPin>;
+/// The always-on sensor's LPn is not on a GPIO (it follows IOVDD), so no LPn
+/// pin; `set_i2c_address` needs none either.
+pub type Sensor = Vl53l5cx<SensorI2c, SensorDelay, NoPin, NoPin, SensorPowerPin>;
 
 /// Initialise clocks, GPIOs and I2C1, run the sensor power-on sequence and
 /// return a ready-to-`init()` sensor handle.
 ///
-/// The sensor is powered and out of reset but **not** `init()`-ed: callers
-/// decide when to pay for the ~86 KB firmware upload.
+/// The sensor is powered, its I2C interface reset, but **not** `init()`-ed:
+/// callers decide when to pay for the ~86 KB firmware upload.
 ///
-/// Power-on sequence (same timing as the Embassy demo): rail off and reset
-/// asserted for 500 ms, rail on, 100 ms, reset released, 1 ms. PB9 is held
-/// low throughout so the second sensor position stays gated off.
+/// Power-on sequence (same timing as the Embassy demo): rail off for 500 ms,
+/// rail on, 100 ms, then I2C_RST pulsed high for 10 ms (`pulse_i2c_rst`) and
+/// 1 ms settle. PB9 is held low throughout so the second sensor position stays
+/// gated off. `Sensor::power_cycle()` repeats the rail cycle with UM2884 §4.2
+/// timing whenever a real reset is needed later.
 pub fn board_init() -> Sensor {
     let dp = pac::Peripherals::take().unwrap();
     let cp = cortex_m::Peripherals::take().unwrap();
@@ -71,21 +78,22 @@ pub fn board_init() -> Sensor {
     let gpiob = dp.GPIOB.split();
     let gpiod = dp.GPIOD.split();
 
-    // --- Sensor control pins, initial state: rail off, reset asserted, 2nd gated ---
-    let mut pwr_en = gpiod.pd2.into_push_pull_output_in_state(PinState::High); // active low
-    let mut i2c_reset = gpiob.pb8.into_push_pull_output_in_state(PinState::High); // active high
+    // --- Sensor control pins, initial state: rail off, I2C_RST idle (low), 2nd gated ---
+    let mut pwr_en: SensorPowerPin = gpiod.pd2.into_push_pull_output_in_state(PinState::High); // active low
+    let mut i2c_reset: I2cResetPin = gpiob.pb8.into_push_pull_output_in_state(PinState::Low); // active high
     let tof_lp = gpiob.pb9.into_push_pull_output_in_state(PinState::Low); // gate 2nd sensor
 
-    // --- Power-on sequence ---
+    // --- Power-on sequence (board bring-up; `power_cycle()` does the rail part) ---
     delay.delay_ms(500);
     pwr_en.set_low(); // rail on
     delay.delay_ms(100);
-    i2c_reset.set_low(); // release reset
+    pulse_i2c_rst(&mut i2c_reset, &mut delay).unwrap(); // reset the I2C interface only
     delay.delay_ms(1);
 
-    // PWR_EN and the LPn gate must keep their levels for the life of the
+    // The LPn gate and I2C_RST must keep their levels for the life of the
     // program; leaking the handles is the simplest way to guarantee that.
-    core::mem::forget(pwr_en);
+    // PWR_EN goes into the sensor handle (`power_cycle()`).
+    core::mem::forget(i2c_reset);
     core::mem::forget(tof_lp);
 
     // --- I2C1: PB6 = SCL, PB7 = SDA, open-drain AF4 with internal pull-ups ---
@@ -93,5 +101,5 @@ pub fn board_init() -> Sensor {
     let sda = gpiob.pb7.into_alternate_open_drain::<4>().internal_pull_up(true);
     let i2c = stm32f4xx_hal::i2c::I2c::new(dp.I2C1, (scl, sda), I2C_FREQ_HZ.Hz(), &clocks);
 
-    Vl53l5cx::new(i2c, delay).with_reset_pin_active_high(i2c_reset)
+    Vl53l5cx::new(i2c, delay).with_power_enable_pin_active_low(pwr_en)
 }

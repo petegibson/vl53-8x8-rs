@@ -32,6 +32,8 @@ systick_monotonic!(Mono, 1000);
 
 /// LPn of the centre sensor: I2C enable, active low (not a reset).
 type LpnPin = Pin<'B', 0, Output>;
+/// PWR_EN_C of the centre sensor (active high): `power_cycle()` is the real reset.
+type PwrEnPin = Pin<'A', 7, Output>;
 
 #[cfg(not(feature = "spi-bus"))]
 type SensorBus = vl53_8x8::BlockingI2c<stm32f4xx_hal::i2c::I2c<pac::I2C1>>;
@@ -45,7 +47,7 @@ type SensorBus = vl53_8x8::BlockingSpi<
     >,
 >;
 
-type AppSensor = Sensor<SensorBus, Mono, LpnPin>;
+type AppSensor = Sensor<SensorBus, Mono, LpnPin, vl53_8x8::NoPin, PwrEnPin>;
 
 #[rtic::app(device = stm32f4xx_hal::pac, dispatchers = [EXTI1, EXTI2], peripherals = true)]
 mod app {
@@ -88,7 +90,8 @@ mod app {
         let mut pwr_en_c = gpioa.pa7.into_push_pull_output(); // PWR_EN_C
         let lp_c = gpiob.pb0.into_push_pull_output(); // LPn centre, active low
 
-        // --- Power-up sequence (busy-wait: the monotonic cannot be awaited in init) ---
+        // --- Power-up sequence (busy-wait: the monotonic cannot be awaited in init;
+        //     the sensor task's `power_cycle()` repeats it through the driver) ---
         pwr_en_c.set_low();
         cortex_m::asm::delay(SYSCLK_HZ / 1000 * 50);
         pwr_en_c.set_high();
@@ -132,7 +135,9 @@ mod app {
         };
 
         // The monotonic type itself is the driver's `DelayNs`.
-        let sensor = Sensor::new(bus, Mono).with_reset_pin_active_low(lp_c);
+        let sensor = Sensor::new(bus, Mono)
+            .with_lpn_pin(lp_c)
+            .with_power_enable_pin_active_high(pwr_en_c);
 
         ranging::spawn().ok();
         heartbeat::spawn().ok();
@@ -146,8 +151,9 @@ mod app {
     async fn ranging(ctx: ranging::Context) {
         let sensor = ctx.local.sensor;
 
-        if let Err(e) = sensor.reset().await {
-            defmt::error!("Sensor reset failed: {}", defmt::Debug2Format(&e));
+        // UM2884 §4.2 reset through PWR_EN_C and LPn; leaves LPn high (I2C enabled).
+        if let Err(e) = sensor.power_cycle().await {
+            defmt::error!("Sensor power cycle failed: {}", defmt::Debug2Format(&e));
             return;
         }
         Mono::delay(100.millis()).await;

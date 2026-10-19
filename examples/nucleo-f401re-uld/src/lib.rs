@@ -17,8 +17,9 @@ vl53l8cx_uld::bind_platform_driver!(SensorI2c, SensorDelay);
 pub type Sensor = Vl53l8cx<
     SensorI2c,
     SensorDelay,
-    stm32f4xx_hal::gpio::Pin<'B', 0, stm32f4xx_hal::gpio::Output>,
-    stm32f4xx_hal::gpio::Pin<'A', 4, stm32f4xx_hal::gpio::Input>,
+    stm32f4xx_hal::gpio::Pin<'B', 0, stm32f4xx_hal::gpio::Output>, // LPn (comms enable)
+    stm32f4xx_hal::gpio::Pin<'A', 4, stm32f4xx_hal::gpio::Input>,  // INT
+    stm32f4xx_hal::gpio::Pin<'A', 7, stm32f4xx_hal::gpio::Output>, // PWR_EN_C (active high)
 >;
 
 // --- SPI mode ---
@@ -42,16 +43,17 @@ vl53l8cx_uld::bind_platform_driver_spi!(SensorSpi, SensorDelay);
 pub type Sensor = Vl53l8cx<
     Vl53l8cxSpiDevice<SensorSpi>,
     SensorDelay,
-    stm32f4xx_hal::gpio::Pin<'B', 0, stm32f4xx_hal::gpio::Output>,
-    stm32f4xx_hal::gpio::Pin<'A', 4, stm32f4xx_hal::gpio::Input>,
+    stm32f4xx_hal::gpio::Pin<'B', 0, stm32f4xx_hal::gpio::Output>, // LPn (comms enable)
+    stm32f4xx_hal::gpio::Pin<'A', 4, stm32f4xx_hal::gpio::Input>,  // INT
+    stm32f4xx_hal::gpio::Pin<'A', 7, stm32f4xx_hal::gpio::Output>, // PWR_EN_C (active high)
 >;
 
 // --- Board init ---
 
 /// Initialise clocks, GPIOs, and the bus, returning a ready-to-use sensor handle.
 ///
-/// The sensor is reset but **not** `init()`-ed — callers decide when to do
-/// the (slow) firmware upload.
+/// The sensor is power-cycled (its only real reset) but **not** `init()`-ed —
+/// callers decide when to do the (slow) firmware upload.
 #[cfg(not(feature = "spi-bus"))]
 pub fn board_init() -> Sensor {
     let dp = pac::Peripherals::take().unwrap();
@@ -77,7 +79,7 @@ pub fn board_init() -> Sensor {
     let lp_c = gpiob.pb0.into_push_pull_output(); // LPn center
     let int_c = gpioa.pa4.into_pull_up_input(); // INT center
 
-    // --- Power-up sequence ---
+    // --- Power-up sequence (board bring-up; `power_cycle()` below does the same) ---
     pwr_en_c.set_low();
     cortex_m::asm::delay(84_000 * 50);
 
@@ -93,10 +95,13 @@ pub fn board_init() -> Sensor {
     );
 
     let mut sensor = Vl53l8cx::new(i2c, delay)
-        .with_reset_pin_active_low(lp_c)
-        .with_interrupt_pin_active_low(int_c);
+        .with_lpn_pin(lp_c)
+        .with_interrupt_pin_active_low(int_c)
+        .with_power_enable_pin_active_high(pwr_en_c);
 
-    sensor.reset().unwrap();
+    // UM2884 §4.2 reset: PWR_EN and LPn low, 10 ms, high (leaves LPn high =
+    // I2C enabled); the only real reset the sensor has. 100 ms extra margin.
+    sensor.power_cycle().unwrap();
     cortex_m::asm::delay(84_000 * 100);
 
     sensor
@@ -127,7 +132,7 @@ pub fn board_init() -> Sensor {
     // INT center
     let int_c = gpioa.pa4.into_pull_up_input();
 
-    // Power-up sequence
+    // Power-up sequence (board bring-up; `power_cycle()` below does the same)
     pwr_en_c.set_low();
     cortex_m::asm::delay(84_000 * 50);
     pwr_en_c.set_high();
@@ -151,10 +156,13 @@ pub fn board_init() -> Sensor {
     let spi_device = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
 
     let mut sensor = Vl53l8cx::new_spi(spi_device, delay)
-        .with_reset_pin_active_low(lp_c)
-        .with_interrupt_pin_active_low(int_c);
+        .with_lpn_pin(lp_c)
+        .with_interrupt_pin_active_low(int_c)
+        .with_power_enable_pin_active_high(pwr_en_c);
 
-    sensor.reset().unwrap();
+    // UM2884 §4.2 reset: PWR_EN and LPn low, 10 ms, high (leaves LPn high =
+    // I2C enabled); the only real reset the sensor has. 100 ms extra margin.
+    sensor.power_cycle().unwrap();
     cortex_m::asm::delay(84_000 * 100);
 
     sensor

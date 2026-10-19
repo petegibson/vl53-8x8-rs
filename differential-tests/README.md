@@ -185,12 +185,14 @@ kept, so a differently decoded register fails too, after the bus comparison.
 `test_ranging_8x8`, `test_ambient_light`, `test_ranging_frequency`,
 `test_target_order`, `test_ranging_mode`, `test_integration_time`,
 `test_sharpener_percent`, `test_power_mode`, `test_set_resolution_while_ranging`,
-`test_reinit_after_reset` (mock reset pin, no bus traffic for the reset),
+`test_reinit_after_reset` (`test_reinit_after_power_cycle` on target since
+0.2.0; mock power-enable and LPn pins, no bus traffic for the power cycle),
 `test_vhv_repeat_count`, `test_external_sync_pin_enable`,
 `test_wait_for_data_ready_blocking` (mock INT pin reads asserted),
 `test_detection_thresholds_enable`, `test_detection_thresholds_auto_stop`,
-`test_detection_thresholds` (differential check ignored, see
-KNOWN_DIVERGENCES.md), `test_motion_indicator_init`,
+`test_detection_thresholds` (all three checks ignored until the recordings are
+re-taken: since 0.2.0 the sequence sets `VL53L8CX_LAST_THRESHOLD` on its last
+entry as ST's header requires), `test_motion_indicator_init`,
 `test_motion_indicator_set_distance`, `test_motion_indicator_set_resolution`,
 `test_xtalk_margin`, `test_caldata_xtalk`.
 

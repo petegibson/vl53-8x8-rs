@@ -1,6 +1,6 @@
 [package]
 name = "vl53-8x8-types"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.81"
 license = "BSD-3-Clause"
@@ -15,6 +15,8 @@ categories = ["embedded", "no-std", "hardware-support"]
 features = ["xtalk", "motion", "thresholds"]
 
 [dependencies]
+# Only for the `OutputPin` bound of `MaybeOutputPin`; no code of embedded-hal is run.
+embedded-hal = "1.0.0"
 
 [features]
 # Plugin features. This crate has no code of its own behind them; they only

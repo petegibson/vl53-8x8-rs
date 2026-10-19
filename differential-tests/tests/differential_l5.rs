@@ -52,7 +52,7 @@ const SENSOR_ADDRESS: u8 = 0x29;
 
 // --- C L5 ULD wrapper adapter -----------------------------------------------------
 
-type CSensor = vl53l5cx_uld::Vl53l5cx<MockI2c, MockDelay, MockPin, MockPin>;
+type CSensor = vl53l5cx_uld::Vl53l5cx<MockI2c, MockDelay, MockPin, MockPin, MockPin>;
 type CError = vl53l5cx_uld::Error<core::convert::Infallible>;
 
 struct CDriver {
@@ -63,8 +63,9 @@ struct CDriver {
 impl CDriver {
     fn new(i2c: MockI2c, delay: MockDelay) -> Self {
         let sensor = vl53l5cx_uld::Vl53l5cx::new(i2c, delay)
-            .with_reset_pin_active_low(MockPin)
-            .with_interrupt_pin_active_low(MockPin);
+            .with_lpn_pin(MockPin)
+            .with_interrupt_pin_active_low(MockPin)
+            .with_power_enable_pin_active_high(MockPin);
         CDriver { sensor, motion: unsafe { core::mem::zeroed() } }
     }
 }
@@ -84,8 +85,8 @@ impl Driver for CDriver {
     fn init(&mut self) -> Result<(), CError> {
         self.sensor.init()
     }
-    fn reset(&mut self) -> Result<(), CError> {
-        self.sensor.reset()
+    fn power_cycle(&mut self) -> Result<(), CError> {
+        self.sensor.power_cycle()
     }
     fn set_resolution(&mut self, r: Resolution) -> Result<(), CError> {
         self.sensor.set_resolution(r)

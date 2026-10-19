@@ -14,7 +14,6 @@
 //! `sensor.init()` (and ideally each `get_ranging_data()` call) inside
 //! `tokio::task::spawn_blocking`.
 
-use std::time::Duration;
 
 use anyhow::Context;
 use rpi_zero_2w::{
@@ -37,10 +36,12 @@ async fn main() -> anyhow::Result<()> {
     log::info!("Acquiring LPn on BCM GPIO{LPN_GPIO}...");
     let lpn = open_lpn().context("open LPn — is the user in the gpio group, or run with sudo?")?;
 
-    let mut sensor = Sensor::new_spi(BlockingSpi(spi), TokioDelay).with_reset_pin_active_low(lpn);
+    let mut sensor = Sensor::new_spi(BlockingSpi(spi), TokioDelay).with_lpn_pin(lpn);
 
-    sensor.reset().await.context("LPn pulse (I2C enable; init() does the real reboot)")?;
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    // open_lpn() leaves the line low; drive it high (comms enable). The Pololu
+    // board has no PWR_EN, so there is no power_cycle(); init() reboots the
+    // sensor in software.
+    sensor.lpn_enable().context("drive LPn high")?;
 
     log::info!(
         "Uploading firmware (~{FIRMWARE_SIZE_KB} KB, ~{:.1} s at {freq})...",

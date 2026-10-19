@@ -19,7 +19,8 @@ use std::fmt::Debug;
 use vl53_8x8::bus::VlBusAsync;
 use vl53_8x8::{
     DetectionThreshold, FirmwareError, MotionConfiguration, PowerMode, RangingMode, Resolution,
-    TargetOrder, ThresholdMeasurement, ThresholdOperation, ThresholdType, XTALK_BUFFER_SIZE,
+    TargetOrder, ThresholdMeasurement, ThresholdOperation, ThresholdType, VL53L8CX_LAST_THRESHOLD,
+    XTALK_BUFFER_SIZE,
 };
 
 use crate::mock::{block_on, MockDelay, MockI2c, MockPin, MockSpi};
@@ -38,7 +39,8 @@ pub trait Driver {
 
     fn is_alive(&mut self) -> Result<bool, Self::Error>;
     fn init(&mut self) -> Result<(), Self::Error>;
-    fn reset(&mut self) -> Result<(), Self::Error>;
+    /// `power_cycle()` on mock power-enable and LPn pins: no bus traffic.
+    fn power_cycle(&mut self) -> Result<(), Self::Error>;
 
     fn set_resolution(&mut self, r: Resolution) -> Result<(), Self::Error>;
     fn get_resolution(&mut self) -> Result<Resolution, Self::Error>;
@@ -94,7 +96,7 @@ pub trait Driver {
 
 // --- vl53-8x8 adapter ---------------------------------------------------------
 
-pub type RustSensor<BUS> = vl53_8x8::Sensor<BUS, MockDelay, MockPin, MockPin>;
+pub type RustSensor<BUS> = vl53_8x8::Sensor<BUS, MockDelay, MockPin, MockPin, MockPin>;
 pub type RustSpiBus = vl53_8x8::BlockingSpi<MockSpi>;
 pub type RustI2cBus = vl53_8x8::BlockingI2c<MockI2c>;
 
@@ -122,8 +124,9 @@ impl RustDriver<RustI2cBus> {
 impl<BUS: VlBusAsync> RustDriver<BUS> {
     fn over(bus: BUS, delay: MockDelay) -> Self {
         let sensor = vl53_8x8::Sensor::new(bus, delay)
-            .with_reset_pin_active_low(MockPin)
-            .with_interrupt_pin_active_low(MockPin);
+            .with_lpn_pin(MockPin)
+            .with_interrupt_pin_active_low(MockPin)
+            .with_power_enable_pin_active_high(MockPin);
         RustDriver { sensor, motion: unsafe { core::mem::zeroed() } }
     }
 }
@@ -139,8 +142,8 @@ impl<BUS: VlBusAsync<Error = core::convert::Infallible>> Driver for RustDriver<B
     fn init(&mut self) -> Result<(), RustError> {
         block_on(self.sensor.init())
     }
-    fn reset(&mut self) -> Result<(), RustError> {
-        block_on(self.sensor.reset())
+    fn power_cycle(&mut self) -> Result<(), RustError> {
+        block_on(self.sensor.power_cycle())
     }
     fn set_resolution(&mut self, r: Resolution) -> Result<(), RustError> {
         block_on(self.sensor.set_resolution(r))
@@ -412,11 +415,14 @@ pub fn run_sequence<D: Driver>(name: &str, d: &mut D) -> R<D> {
             assert_eq!(d.get_resolution()?, Resolution::Res8x8);
             d.stop_ranging()
         }
-        // The on-target test busy-waits 100 ms after reset; no bus traffic.
+        // On target this is now `test_reinit_after_power_cycle` (0.2.0: `reset()`
+        // only pulsed LPn, `power_cycle()` is the real reset); the recordings
+        // predate the rename, so the sequence keeps the old name. Neither the
+        // pin pulses nor the 100 ms wait produce bus traffic.
         "test_reinit_after_reset" => {
             d.init()?;
             d.set_resolution(Resolution::Res8x8)?;
-            d.reset()?;
+            d.power_cycle()?;
             d.init()?;
             assert!(d.is_alive()?);
             d.set_resolution(Resolution::Res4x4)?;
@@ -470,8 +476,10 @@ pub fn run_sequence<D: Driver>(name: &str, d: &mut D) -> R<D> {
         "test_detection_thresholds" => {
             d.init()?;
             let mut thresholds: [DetectionThreshold; 64] = unsafe { core::mem::zeroed() };
+            // Single entry, so it is also the last one: ST's header requires
+            // VL53L8CX_LAST_THRESHOLD OR'd into its zone_num.
             thresholds[0] = DetectionThreshold {
-                zone_num: 0,
+                zone_num: 0 | VL53L8CX_LAST_THRESHOLD,
                 measurement: ThresholdMeasurement::DistanceMm,
                 threshold_type: ThresholdType::LessThanEqualMin,
                 low_threshold: 500,
@@ -480,7 +488,7 @@ pub fn run_sequence<D: Driver>(name: &str, d: &mut D) -> R<D> {
             };
             d.set_detection_thresholds(thresholds)?;
             let readback = d.get_detection_thresholds()?;
-            assert_eq!(readback[0].zone_num, 0);
+            assert_eq!(readback[0].zone_num & !VL53L8CX_LAST_THRESHOLD, 0);
             assert_eq!(readback[0].low_threshold, 500);
             Ok(())
         }

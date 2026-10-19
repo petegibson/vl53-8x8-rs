@@ -30,7 +30,10 @@ targets, a C cross compiler such as `arm-none-eabi-gcc`. See the
 The ULD calls back into Rust for bus access and delays, so a program must
 invoke `bind_platform_driver!` (I2C) or `bind_platform_driver_spi!` (SPI)
 **exactly once**, at crate level, with its concrete bus and delay types.
-Then construct a `Vl53l8cx`, optionally attach LPn and INT pins, and `init`.
+Then construct a `Vl53l8cx`, optionally attach the LPn (I2C comms enable),
+INT and power-enable pins, and `init`. `power_cycle()` through the
+power-enable pin is the sensor's only real reset (UM2884 §4.2); LPn is not a
+reset, and `init()` alone re-initialises a running sensor.
 
 ```rust,ignore
 use vl53l8cx_uld::{Resolution, Vl53l8cx};
@@ -40,9 +43,10 @@ vl53l8cx_uld::bind_platform_driver!(MyI2c, MyDelay);
 // SPI instead:  vl53l8cx_uld::bind_platform_driver_spi!(MySpiDevice, MyDelay);
 
 let mut sensor = Vl53l8cx::new(i2c, delay)         // or Vl53l8cx::new_spi(spi_device, delay)
-    .with_reset_pin_active_low(lpn)                 // optional
-    .with_interrupt_pin_active_low(int);            // optional
-sensor.reset()?;
+    .with_lpn_pin(lpn)                              // optional: LPn, I2C comms enable (active low)
+    .with_interrupt_pin_active_low(int)             // optional
+    .with_power_enable_pin_active_high(pwr_en);     // optional: PWR_EN, enables power_cycle()
+sensor.power_cycle()?;                              // optional real reset; init() reboots anyway
 sensor.init()?;                                     // is_alive probe + ~86 KB firmware upload
 
 sensor.set_resolution(Resolution::Res4x4)?;
