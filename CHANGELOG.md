@@ -81,7 +81,13 @@ ignored until then).
   `PWR_EN_C` and power-cycle through the driver, the evo C-ULD example attaches
   `PWR_EN` (active low) and pulses I2C_RST with `pulse_i2c_rst`, the Pi example
   drives LPn high with `lpn_enable()`. `test_reinit_after_reset` is now
-  `test_reinit_after_power_cycle` in every on-target suite.
+  `test_reinit_after_power_cycle` in every on-target suite, and
+  `test_set_resolution_while_ranging` became
+  `test_set_resolution_between_ranging_sessions`: changing the resolution
+  mid-stream is not a supported operation and once left the firmware reporting
+  GO2 status 0xc5 at the following stop.
+- Differential-test recordings of the Nucleo L8 suites re-taken with the 0.2.0
+  sequences (`VL53L8CX_LAST_THRESHOLD` set, power cycle, new test names).
 
 ## 0.1.0 — 2026-10-16
 

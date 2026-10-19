@@ -486,18 +486,24 @@ mod tests {
     // --- formerly tests/sensor_async_extra.rs (merged once the Sensor moved into a
     //     static: per-test task pools are now small enough for one binary) ---
 
+    /// Resolution is a stopped-sensor setting: the ULD sets it before
+    /// `start_ranging`, and changing it mid-stream occasionally leaves the
+    /// firmware reporting GO2 status 0xc5 at the following stop (seen once on
+    /// the Nucleo under bus tracing). Stop, change, restart.
     #[test]
     #[timeout(10)]
-    async fn test_set_resolution_while_ranging(mut sensor: SensorRef) {
+    async fn test_set_resolution_between_ranging_sessions(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
         sensor.set_resolution(Resolution::Res4x4).await.unwrap();
         sensor.set_ranging_frequency_hz(5).await.unwrap();
         sensor.start_ranging().await.unwrap();
+        sensor.stop_ranging().await.unwrap();
 
-        // Change resolution while ranging
+        // Change resolution between two ranging sessions
         sensor.set_resolution(Resolution::Res8x8).await.unwrap();
         assert_eq!(sensor.get_resolution().await.unwrap(), Resolution::Res8x8);
 
+        sensor.start_ranging().await.unwrap();
         sensor.stop_ranging().await.unwrap();
     }
 

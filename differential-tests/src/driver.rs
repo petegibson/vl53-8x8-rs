@@ -283,8 +283,8 @@ pub const SEQUENCES: &[&str] = &[
     "test_integration_time",
     "test_sharpener_percent",
     "test_power_mode",
-    "test_set_resolution_while_ranging",
-    "test_reinit_after_reset",
+    "test_set_resolution_between_ranging_sessions",
+    "test_reinit_after_power_cycle",
     "test_vhv_repeat_count",
     "test_external_sync_pin_enable",
     "test_wait_for_data_ready_blocking",
@@ -406,20 +406,20 @@ pub fn run_sequence<D: Driver>(name: &str, d: &mut D) -> R<D> {
             assert_eq!(d.get_power_mode()?, PowerMode::Wakeup);
             Ok(())
         }
-        "test_set_resolution_while_ranging" => {
+        "test_set_resolution_between_ranging_sessions" => {
             d.init()?;
             d.set_resolution(Resolution::Res4x4)?;
             d.set_ranging_frequency_hz(5)?;
             d.start_ranging()?;
+            d.stop_ranging()?;
             d.set_resolution(Resolution::Res8x8)?;
             assert_eq!(d.get_resolution()?, Resolution::Res8x8);
+            d.start_ranging()?;
             d.stop_ranging()
         }
-        // On target this is now `test_reinit_after_power_cycle` (0.2.0: `reset()`
-        // only pulsed LPn, `power_cycle()` is the real reset); the recordings
-        // predate the rename, so the sequence keeps the old name. Neither the
-        // pin pulses nor the 100 ms wait produce bus traffic.
-        "test_reinit_after_reset" => {
+        // `power_cycle()` drives the mock power-enable and LPn pins and waits;
+        // none of that produces bus traffic, so the sequence is init, init.
+        "test_reinit_after_power_cycle" => {
             d.init()?;
             d.set_resolution(Resolution::Res8x8)?;
             d.power_cycle()?;

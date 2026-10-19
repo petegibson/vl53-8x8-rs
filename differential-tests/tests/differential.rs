@@ -313,17 +313,14 @@ seq_tests! {
     test_integration_time,
     test_sharpener_percent,
     test_power_mode,
-    test_set_resolution_while_ranging,
-    test_reinit_after_reset,
+    test_set_resolution_between_ranging_sessions,
+    test_reinit_after_power_cycle,
     test_vhv_repeat_count,
     test_external_sync_pin_enable,
     test_wait_for_data_ready_blocking,
     test_detection_thresholds_enable,
     test_detection_thresholds_auto_stop,
-    // 0.2.0: the sequence now sets VL53L8CX_LAST_THRESHOLD on its (single, hence
-    // last) entry as ST's header requires; both recordings were taken without
-    // it and differ in that one byte. Re-record on the Nucleo, then drop this.
-    test_detection_thresholds [ignore_all = "re-record pending: LAST_THRESHOLD now set"],
+    test_detection_thresholds,
     test_motion_indicator_init,
     test_motion_indicator_set_distance,
     test_motion_indicator_set_resolution,

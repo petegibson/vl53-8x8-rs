@@ -80,7 +80,7 @@ Common to both ST ULDs: `test_sensor_alive`, `test_init`,
 `test_set_resolution`, `test_ranging_4x4`, `test_ranging_8x8`,
 `test_ambient_light`, `test_ranging_frequency`, `test_target_order`,
 `test_ranging_mode`, `test_integration_time`, `test_sharpener_percent`,
-`test_set_resolution_while_ranging`, `test_reinit_after_power_cycle`,
+`test_set_resolution_between_ranging_sessions`, `test_reinit_after_power_cycle`,
 `test_vhv_repeat_count`, `test_set_address`.
 
 VL53L5CX-specific: `test_power_mode` covers Sleep/Wakeup and checks that

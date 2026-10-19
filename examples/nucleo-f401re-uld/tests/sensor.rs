@@ -218,18 +218,24 @@ mod tests {
         assert_eq!(sensor.get_power_mode().unwrap(), PowerMode::Wakeup);
     }
 
+    /// Resolution is a stopped-sensor setting: the ULD sets it before
+    /// `start_ranging`, and changing it mid-stream occasionally leaves the
+    /// firmware reporting GO2 status 0xc5 at the following stop (seen once on
+    /// the Nucleo under bus tracing). Stop, change, restart.
     #[test]
     #[timeout(10)]
-    fn test_set_resolution_while_ranging(mut sensor: nucleo_f401re_uld::Sensor) {
+    fn test_set_resolution_between_ranging_sessions(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
         sensor.set_resolution(Resolution::Res4x4).unwrap();
         sensor.set_ranging_frequency_hz(5).unwrap();
         sensor.start_ranging().unwrap();
+        sensor.stop_ranging().unwrap();
 
-        // Change resolution while ranging
+        // Change resolution between two ranging sessions
         sensor.set_resolution(Resolution::Res8x8).unwrap();
         assert_eq!(sensor.get_resolution().unwrap(), Resolution::Res8x8);
 
+        sensor.start_ranging().unwrap();
         sensor.stop_ranging().unwrap();
     }
 

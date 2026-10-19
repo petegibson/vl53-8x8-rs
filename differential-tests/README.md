@@ -29,12 +29,13 @@ both drivers upload the firmware in the same three bank writes (32768, 32768,
 differing op index, the op from each side and three ops of context on both
 sides. The delay each driver requested is printed (`-- --nocapture`), not
 asserted. Against the C model the Rust driver requests exactly the C driver's
-total in every sequence that does not stop ranging, and 10 ms less in the four
-that do (`test_ranging_4x4`, `test_ranging_8x8`, `test_ambient_light`,
-`test_set_resolution_while_ranging`): ST's `vl53l8cx_stop_ranging` waits 10 ms
-after every poll of register `0x06`, including the one that sees the MCU
-stopped, while `vl53-8x8` breaks out of the loop before that last wait. Same
-bytes, one `delay_ms(10)` fewer.
+total in every sequence that does not stop ranging, and 10 ms less per stop
+in the four that do (`test_ranging_4x4`, `test_ranging_8x8`,
+`test_ambient_light`, and 20 ms in
+`test_set_resolution_between_ranging_sessions`, which stops twice): ST's
+`vl53l8cx_stop_ranging` waits 10 ms after every poll of register `0x06`,
+including the one that sees the MCU stopped, while `vl53-8x8` breaks out of the
+loop before that last wait. Same bytes, one `delay_ms(10)` fewer per stop.
 
 ### VL53L5CX (`tests/differential_l5.rs`)
 
@@ -184,9 +185,9 @@ kept, so a differently decoded register fails too, after the bus comparison.
 `test_sensor_alive`, `test_init`, `test_set_resolution`, `test_ranging_4x4`,
 `test_ranging_8x8`, `test_ambient_light`, `test_ranging_frequency`,
 `test_target_order`, `test_ranging_mode`, `test_integration_time`,
-`test_sharpener_percent`, `test_power_mode`, `test_set_resolution_while_ranging`,
-`test_reinit_after_reset` (`test_reinit_after_power_cycle` on target since
-0.2.0; mock power-enable and LPn pins, no bus traffic for the power cycle),
+`test_sharpener_percent`, `test_power_mode`,
+`test_set_resolution_between_ranging_sessions`, `test_reinit_after_power_cycle`
+(mock power-enable and LPn pins, no bus traffic for the power cycle),
 `test_vhv_repeat_count`, `test_external_sync_pin_enable`,
 `test_wait_for_data_ready_blocking` (mock INT pin reads asserted),
 `test_detection_thresholds_enable`, `test_detection_thresholds_auto_stop`,
