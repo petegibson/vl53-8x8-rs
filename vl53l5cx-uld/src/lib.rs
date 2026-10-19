@@ -182,13 +182,14 @@ impl<BUS, D, RST, INT> Vl53l5cx<BUS, D, RST, INT> {
     /// low means "held off".
     ///
     /// Despite its name, LPn is not a reset and has nothing to do with power: it
-    /// is the I2C *communication enable*. Low disables the sensor's I2C
+    /// is what the datasheet calls the "Comms enable". Low disables the sensor's I2C
     /// interface, high enables it, and ST's guidance is that its only purpose is
     /// multi-sensor address assignment: hold every other sensor's LPn low, change
     /// one sensor's address, then leave LPn high. Pulsing it via
     /// [`reset`](Self::reset) therefore does **not** reset the sensor or discard
     /// its firmware; `init()` performs ST's software reboot sequence itself. A
-    /// real reset is a power cycle of the sensor supplies (see UM3109).
+    /// real reset is a power cycle of the sensor supplies (UM2884 for the
+    /// VL53L5CX, UM3109 for the VL53L8CX).
     pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Vl53l5cx<BUS, D, RstNew, INT> {
         Vl53l5cx {
             comms: self.comms,
@@ -276,7 +277,7 @@ where
     /// and does not reset the sensor; on the VL53L5CX's I2C_RST it resets the
     /// I2C interface only. Neither discards the firmware. ST's ULD has no reset
     /// function either: a real reset is a power cycle of the sensor supplies
-    /// (UM3109), and `init()` always starts with ST's software reboot sequence,
+    /// (UM2884 / UM3109), and `init()` always starts with ST's software reboot sequence,
     /// so calling `init()` is sufficient to re-initialise a running sensor.
     pub fn reset(&mut self) -> Result<(), Error<E>> {
         self.set_reset_state(true)?;
