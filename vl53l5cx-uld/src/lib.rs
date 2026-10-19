@@ -279,8 +279,9 @@ where
     /// function either. A real reset is the supply cycle from UM2884 / UM3109:
     /// drive VDDIO, AVDD and LPn low, wait 10 ms, then drive them high again
     /// (LPn goes low with the supplies because a digital input must not sit above
-    /// IOVDD while IOVDD is off). `init()` then expects the supplies and LPn high
-    /// and I2C_RST low. Since `init()` always starts with ST's software reboot
+    /// IOVDD while IOVDD is off; if LPn hangs only on its pull-up to IOVDD rather
+    /// than on a GPIO, it follows the rail by itself and needs no driving). `init()`
+    /// then expects the supplies and LPn high and I2C_RST low. Since `init()` always starts with ST's software reboot
     /// sequence, calling it is sufficient to re-initialise a running sensor.
     pub fn reset(&mut self) -> Result<(), Error<E>> {
         self.set_reset_state(true)?;
