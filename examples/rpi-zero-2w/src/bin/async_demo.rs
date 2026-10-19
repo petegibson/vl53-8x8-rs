@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut sensor = Sensor::new_spi(BlockingSpi(spi), TokioDelay).with_reset_pin_active_low(lpn);
 
-    sensor.reset().await.context("sensor reset (LPn toggle)")?;
+    sensor.reset().await.context("LPn pulse (I2C enable; init() does the real reboot)")?;
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     log::info!(

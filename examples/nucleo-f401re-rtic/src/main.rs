@@ -30,7 +30,7 @@ const SYSCLK_HZ: u32 = 84_000_000;
 // SysTick monotonic at 1 kHz; implements `embedded_hal_async::delay::DelayNs`.
 systick_monotonic!(Mono, 1000);
 
-/// LPn of the centre sensor (reset, active low).
+/// LPn of the centre sensor: I2C enable, active low (not a reset).
 type LpnPin = Pin<'B', 0, Output>;
 
 #[cfg(not(feature = "spi-bus"))]

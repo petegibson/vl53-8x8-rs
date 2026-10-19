@@ -11,7 +11,7 @@
 //! |  GPIO10| 19     | SDA          | SPI0 MOSI                   |
 //! |  GPIO9 | 21     | MISO         | SPI0 MISO                   |
 //! |  GPIO8 | 24     | NCS          | SPI0 CE0 (managed by spidev)|
-//! |  GPIO17| 11     | LPn          | sensor reset (active low)   |
+//! |  GPIO17| 11     | LPn          | I2C enable, active low      |
 //!
 //! On the Pololu breakout, set the SPI/I2C selector for SPI mode (the
 //! board ships in I2C by default; UM2884-style jumper or solder pad).
@@ -39,7 +39,7 @@ pub const SPI_DEVICE: &str = "/dev/spidev0.0";
 /// Pi GPIO chip used for general-purpose pins.
 pub const GPIOCHIP: &str = "/dev/gpiochip0";
 
-/// LPn (sensor reset, active low) on BCM GPIO17 (header pin 11).
+/// LPn (I2C enable, active low; not a reset) on BCM GPIO17 (header pin 11).
 pub const LPN_GPIO: u32 = 17;
 
 /// SPI clock frequency. The VL53L8CX tolerates several MHz on SPI; the
@@ -101,7 +101,7 @@ pub fn open_spi() -> anyhow::Result<SensorSpi> {
     Ok(spi)
 }
 
-/// Acquire BCM GPIO17 as an OutputPin to drive LPn (initial low: held in reset).
+/// Acquire BCM GPIO17 as an OutputPin to drive LPn (initial low: I2C disabled).
 pub fn open_lpn() -> anyhow::Result<LpnPin> {
     let mut chip = Chip::new(GPIOCHIP)?;
     let line = chip.get_line(LPN_GPIO)?;

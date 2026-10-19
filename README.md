@@ -71,7 +71,8 @@ vl53l8cx-uld = "0.1"        # blocking wrapper over ST's VL53L8CX ULD (needs lib
 ```
 
 Both drivers follow the same shape: construct from a bus and a delay,
-optionally attach a reset (LPn) and interrupt pin, call `init()` to upload the
+optionally attach the LPn line (I2C enable, needed for multi-sensor address
+assignment) and the INT pin, call `init()` to upload the
 firmware, then configure and range. Every call returns
 `Result<_, Error<BusError>>`.
 

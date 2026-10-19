@@ -122,7 +122,7 @@ pub fn board_init() -> Sensor {
 
     // PWR_EN_C
     let mut pwr_en_c = gpioa.pa7.into_push_pull_output();
-    // LPn center (reset active low, HIGH = enabled)
+    // LPn centre sensor: I2C enable (active low = disabled; it is not a reset)
     let lp_c = gpiob.pb0.into_push_pull_output();
     // INT center
     let int_c = gpioa.pa4.into_pull_up_input();

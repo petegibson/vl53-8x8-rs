@@ -74,7 +74,7 @@ mod bus_setup {
             Level::Low,
             Speed::Low,
         );
-        // LPn LOW = sensor in reset, HIGH = sensor enabled (datasheet).
+        // LPn LOW = I2C disabled, HIGH = I2C enabled (it is a comms enable, not a reset).
         // Pulse reset then leave HIGH so sensor is ready for init().
         lp_c.set_low();
         cortex_m::asm::delay(84_000 * 10);
@@ -154,7 +154,7 @@ mod bus_setup {
             Level::Low,
             Speed::Low,
         );
-        // LPn LOW = sensor in reset, HIGH = sensor enabled (datasheet).
+        // LPn LOW = I2C disabled, HIGH = I2C enabled (it is a comms enable, not a reset).
         // Pulse reset then leave HIGH so sensor is ready for init().
         lp_c.set_low();
         cortex_m::asm::delay(84_000 * 10);

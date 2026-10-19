@@ -34,8 +34,9 @@ pub const I2C_FREQ_HZ: u32 = 1_000_000;
 
 pub type SensorI2c = stm32f4xx_hal::i2c::I2c<pac::I2C1>;
 pub type SensorDelay = stm32f4xx_hal::timer::SysDelay;
-/// I2C_RESET (PB8, active high), attached as the sensor's reset pin so
-/// `Sensor::reset` and `Sensor::set_i2c_address` are available.
+/// I2C_RESET (PB8, active high) is the sensors' I2C_RST input: it resets the
+/// I2C interface only, not the sensor. It is attached as the driver's "reset"
+/// line so `Sensor::reset` and `Sensor::set_i2c_address` are available.
 pub type SensorResetPin = Pin<'B', 8, Output>;
 
 vl53l5cx_uld::bind_platform_driver!(SensorI2c, SensorDelay);

@@ -38,7 +38,7 @@ driver detect the part, use the Embassy sibling.
 | SCL         | PB6 | AF4, open drain, internal pull-up                         |
 | SDA         | PB7 | AF4, open drain, internal pull-up                         |
 | PWR_EN      | PD2 | active **low** (low = sensor rail on)                     |
-| I2C_RESET   | PB8 | active **high**; attached as the sensor's reset pin       |
+| I2C_RESET   | PB8 | active **high**; the sensors' I2C_RST (I2C interface reset) |
 | LPn (2nd)   | PB9 | gates the optional second sensor; held **low**            |
 
 Clock: HSE 8 MHz crystal -> PLL -> 96 MHz SYSCLK, 48 MHz APB1 (I2C1), 96 MHz

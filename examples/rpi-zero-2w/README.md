@@ -38,7 +38,7 @@ transaction-size limit" below.
 | GPIO10 | 19         | SDA          | SPI0 MOSI                   |
 | GPIO9  | 21         | MISO         | SPI0 MISO                   |
 | GPIO8  | 24         | NCS          | SPI0 CE0 (managed by spidev)|
-| GPIO17 | 11         | LPn          | sensor reset (active low)   |
+| GPIO17 | 11         | LPn          | I2C enable, active low      |
 
 The Pololu silkscreen labels `SCL`/`SDA` because the board ships in I2C
 mode. **Set the Pololu's SPI/I2C selector to SPI mode** before running.

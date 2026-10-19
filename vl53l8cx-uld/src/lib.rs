@@ -160,12 +160,17 @@ where
 }
 
 impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
-    /// Attach the sensor's **LPn** pin, or any reset line where low means reset.
+    /// Attach the sensor's **LPn** line (active low), or another line where
+    /// low means "held off".
     ///
-    /// LPn is the part's own low-power / reset input and is active low: holding it
-    /// low keeps the sensor in reset, high lets it run. [`reset`](Self::reset)
-    /// pulses it low for 10 ms. With several sensors on one bus, LPn is also how
-    /// the others are kept quiet while one sensor's I2C address is changed.
+    /// Despite its name, LPn is not a reset and has nothing to do with power: it
+    /// is the I2C *communication enable*. Low disables the sensor's I2C
+    /// interface, high enables it, and ST's guidance is that its only purpose is
+    /// multi-sensor address assignment: hold every other sensor's LPn low, change
+    /// one sensor's address, then leave LPn high. Pulsing it via
+    /// [`reset`](Self::reset) therefore does **not** reset the sensor or discard
+    /// its firmware; `init()` performs ST's software reboot sequence itself. A
+    /// real reset is a power cycle of the sensor supplies (see UM3109).
     pub fn with_reset_pin_active_low<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<BUS, D, RstNew, INT> {
         Vl53l8cx {
             comms: self.comms,
@@ -178,13 +183,13 @@ impl<BUS, D, RST, INT> Vl53l8cx<BUS, D, RST, INT> {
         }
     }
 
-    /// Attach a reset line where **high** means reset.
+    /// Attach a line where **high** means "held off" or "reset".
     ///
-    /// The sensor's LPn pin itself is active low; use this variant when the
-    /// signal is inverted on its way to the sensor (level shifter, transistor),
-    /// or when the board's reset line is the sensor's I2C_RST input, which is
-    /// active high. Either way [`reset`](Self::reset) drives the pin high for
-    /// 10 ms and then releases it.
+    /// Use this for an inverted LPn (level shifter, transistor) or for the
+    /// VL53L5CX's I2C_RST input, which is active high and resets only the I2C
+    /// interface, not the sensor. [`reset`](Self::reset) drives the pin high for
+    /// 10 ms and releases it. The VL53L8CX has no I2C_RST; its SPI_I2C_N pin
+    /// selects the interface, and toggling it only clears the I2C block.
     pub fn with_reset_pin_active_high<RstNew>(self, reset_pin: RstNew) -> Vl53l8cx<BUS, D, RstNew, INT> {
         Vl53l8cx {
             comms: self.comms,
@@ -244,12 +249,17 @@ where
         result.map_err(|_| Error::Pin)
     }
 
-    /// Pulse the configured reset pin: assert for 10 ms, then release.
+    /// Pulse the line configured by
+    /// [`with_reset_pin_active_low`](Self::with_reset_pin_active_low) /
+    /// [`with_reset_pin_active_high`](Self::with_reset_pin_active_high): assert
+    /// for 10 ms, then release.
     ///
-    /// The polarity comes from [`with_reset_pin_active_low`](Self::with_reset_pin_active_low)
-    /// or [`with_reset_pin_active_high`](Self::with_reset_pin_active_high). ST's
-    /// ULD has no equivalent; it leaves LPn and power to the application. A reset
-    /// discards the uploaded firmware, so call [`init`](Self::init) afterwards.
+    /// What this does depends on the line. On LPn it only disables I2C for 10 ms
+    /// and does not reset the sensor; on the VL53L5CX's I2C_RST it resets the
+    /// I2C interface only. Neither discards the firmware. ST's ULD has no reset
+    /// function either: a real reset is a power cycle of the sensor supplies
+    /// (UM3109), and `init()` always starts with ST's software reboot sequence,
+    /// so calling `init()` is sufficient to re-initialise a running sensor.
     pub fn reset(&mut self) -> Result<(), Error<E>> {
         self.set_reset_state(true)?;
         self.comms.delay.delay_ms(10);

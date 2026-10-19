@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut sensor = Vl53l8cx::new_spi(spi, StdDelay).with_reset_pin_active_low(lpn);
 
-    sensor.reset().context("sensor reset (LPn toggle)")?;
+    sensor.reset().context("LPn pulse (I2C enable; init() does the real reboot)")?;
     std::thread::sleep(Duration::from_millis(10));
 
     log::info!(
