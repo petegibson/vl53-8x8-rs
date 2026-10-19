@@ -61,6 +61,15 @@ software reboot sequence, so it needs no hardware reset at all.
   subtraction and panic in debug builds (`vl53-8x8`), or reach ST's ULD, which
   lets it through and computes garbage (wrappers). Bytes on the wire for valid
   inputs are unchanged.
+- `bind_platform_driver!` / `bind_platform_driver_spi!` (both C wrappers) no
+  longer expand `#[cfg(feature = "defmt")]` and `defmt::trace!` into the
+  calling crate. The bus-trace hooks now live in the wrapper crate
+  (`__trace`, hidden), so the wrapper's own `defmt` feature controls tracing,
+  the user needs neither a `defmt` dependency nor a `defmt` feature of their
+  own, and crates without one no longer get an `unexpected_cfgs` warning
+  (seen in the Pi Zero 2W example). Trace format unchanged; verified by
+  re-recording the Nucleo C suite and checking it byte for byte against the
+  committed transcript.
 
 ### Detection thresholds
 

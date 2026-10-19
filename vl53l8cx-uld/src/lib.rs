@@ -838,11 +838,87 @@ where
 #[cfg(test)]
 mod tests;
 
-/// Log data in 16-byte chunks when the `defmt` feature is enabled.
-#[cfg(feature = "defmt")]
-pub fn trace_data(data: &[u8]) {
-    for chunk in data.chunks(16) {
-        defmt::trace!("  {=[u8]:#04x}", chunk);
+/// Bus-trace hooks called from the `bind_platform_driver*!` macros.
+///
+/// They live here rather than in the macro bodies so that the `defmt` feature
+/// of *this* crate decides whether tracing is compiled in. A `cfg(feature)`
+/// inside an exported macro is evaluated in the crate that invokes it, which
+/// would make the user depend on `defmt`, declare a `defmt` feature of their
+/// own, or get an `unexpected_cfgs` warning. Without the feature every hook is
+/// an empty inline function.
+#[doc(hidden)]
+pub mod __trace {
+    #[cfg(feature = "defmt")]
+    fn data(data: &[u8]) {
+        for chunk in data.chunks(16) {
+            defmt::trace!("  {=[u8]:#04x}", chunk);
+        }
+    }
+
+    #[inline(always)]
+    pub fn i2c_read_ok(address: u8, index: u16, size: u32, data_slice: &[u8]) {
+        #[cfg(feature = "defmt")]
+        {
+            defmt::trace!("i2c R [{:#04x}] reg={:#06x} len={}", address, index, size);
+            data(data_slice);
+        }
+        let _ = (address, index, size, data_slice);
+    }
+
+    #[inline(always)]
+    pub fn i2c_read_err(address: u8, index: u16) {
+        #[cfg(feature = "defmt")]
+        defmt::trace!("i2c R [{:#04x}] reg={:#06x} -> ERR", address, index);
+        let _ = (address, index);
+    }
+
+    #[inline(always)]
+    pub fn i2c_write(address: u8, index: u16, size: u32, data_slice: &[u8]) {
+        #[cfg(feature = "defmt")]
+        {
+            defmt::trace!("i2c W [{:#04x}] reg={:#06x} len={}", address, index, size);
+            data(data_slice);
+        }
+        let _ = (address, index, size, data_slice);
+    }
+
+    #[inline(always)]
+    pub fn i2c_write_err() {
+        #[cfg(feature = "defmt")]
+        defmt::trace!("i2c W -> ERR");
+    }
+
+    #[inline(always)]
+    pub fn spi_read_ok(index: u16, size: u32, data_slice: &[u8]) {
+        #[cfg(feature = "defmt")]
+        {
+            defmt::trace!("spi R reg={:#06x} len={}", index, size);
+            data(data_slice);
+        }
+        let _ = (index, size, data_slice);
+    }
+
+    #[inline(always)]
+    pub fn spi_read_err(index: u16) {
+        #[cfg(feature = "defmt")]
+        defmt::trace!("spi R reg={:#06x} -> ERR", index);
+        let _ = index;
+    }
+
+    #[inline(always)]
+    pub fn spi_write(index: u16, size: u32, data_slice: &[u8]) {
+        #[cfg(feature = "defmt")]
+        {
+            defmt::trace!("spi W reg={:#06x} len={}", index, size);
+            data(data_slice);
+        }
+        let _ = (index, size, data_slice);
+    }
+
+    #[inline(always)]
+    pub fn spi_write_err() {
+        #[cfg(feature = "defmt")]
+        defmt::trace!("spi W -> ERR");
     }
 }
 
@@ -867,16 +943,11 @@ macro_rules! bind_platform_driver {
 
             match embedded_hal::i2c::I2c::write_read(&mut comms.bus, address, &index_bytes, data_slice) {
                 Ok(_) => {
-                    #[cfg(feature = "defmt")]
-                    {
-                        defmt::trace!("i2c R [{:#04x}] reg={:#06x} len={}", address, index, size);
-                        $crate::trace_data(data_slice);
-                    }
+                    $crate::__trace::i2c_read_ok(address, index, size, data_slice);
                     0
                 }
                 Err(_) => {
-                    #[cfg(feature = "defmt")]
-                    defmt::trace!("i2c R [{:#04x}] reg={:#06x} -> ERR", address, index);
+                    $crate::__trace::i2c_read_err(address, index);
                     1
                 }
             }
@@ -897,11 +968,7 @@ macro_rules! bind_platform_driver {
             let index_bytes = index.to_be_bytes();
             let address = (platform.address >> 1) as u8;
 
-            #[cfg(feature = "defmt")]
-            {
-                defmt::trace!("i2c W [{:#04x}] reg={:#06x} len={}", address, index, size);
-                $crate::trace_data(data_slice);
-            }
+            $crate::__trace::i2c_write(address, index, size, data_slice);
 
             let mut operations = [
                 embedded_hal::i2c::Operation::Write(&index_bytes),
@@ -911,8 +978,7 @@ macro_rules! bind_platform_driver {
             match embedded_hal::i2c::I2c::transaction(&mut comms.bus, address, &mut operations) {
                 Ok(_) => 0,
                 Err(_) => {
-                    #[cfg(feature = "defmt")]
-                    defmt::trace!("i2c W -> ERR");
+                    $crate::__trace::i2c_write_err();
                     1
                 }
             }
@@ -958,16 +1024,11 @@ macro_rules! bind_platform_driver_spi {
                 embedded_hal::spi::Operation::Read(data_slice),
             ]) {
                 Ok(_) => {
-                    #[cfg(feature = "defmt")]
-                    {
-                        defmt::trace!("spi R reg={:#06x} len={}", index, size);
-                        $crate::trace_data(data_slice);
-                    }
+                    $crate::__trace::spi_read_ok(index, size, data_slice);
                     0
                 }
                 Err(_) => {
-                    #[cfg(feature = "defmt")]
-                    defmt::trace!("spi R reg={:#06x} -> ERR", index);
+                    $crate::__trace::spi_read_err(index);
                     1
                 }
             }
@@ -987,19 +1048,14 @@ macro_rules! bind_platform_driver_spi {
             let data_slice = unsafe { core::slice::from_raw_parts(p_values, size as usize) };
             let addr_bytes = (index | 0x8000).to_be_bytes();
 
-            #[cfg(feature = "defmt")]
-            {
-                defmt::trace!("spi W reg={:#06x} len={}", index, size);
-                $crate::trace_data(data_slice);
-            }
+            $crate::__trace::spi_write(index, size, data_slice);
             match embedded_hal::spi::SpiDevice::transaction(&mut comms.bus.spi, &mut [
                 embedded_hal::spi::Operation::Write(&addr_bytes),
                 embedded_hal::spi::Operation::Write(data_slice),
             ]) {
                 Ok(_) => 0,
                 Err(_) => {
-                    #[cfg(feature = "defmt")]
-                    defmt::trace!("spi W -> ERR");
+                    $crate::__trace::spi_write_err();
                     1
                 }
             }
