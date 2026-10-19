@@ -258,9 +258,12 @@ where
     /// What this does depends on the line. On LPn it only disables I2C for 10 ms
     /// and does not reset the sensor; on the VL53L5CX's I2C_RST it resets the
     /// I2C interface only. Neither discards the firmware. ST's ULD has no reset
-    /// function either: a real reset is a power cycle of the sensor supplies
-    /// (UM2884 / UM3109), and `init()` always starts with ST's software reboot sequence,
-    /// so calling `init()` is sufficient to re-initialise a running sensor.
+    /// function either. A real reset is the supply cycle from UM2884 / UM3109:
+    /// drive VDDIO, AVDD and LPn low, wait 10 ms, then drive them high again
+    /// (LPn goes low with the supplies because a digital input must not sit above
+    /// IOVDD while IOVDD is off). `init()` then expects the supplies and LPn high
+    /// and I2C_RST low. Since `init()` always starts with ST's software reboot
+    /// sequence, calling it is sufficient to re-initialise a running sensor.
     pub fn reset(&mut self) -> Result<(), Error<E>> {
         self.set_reset_state(true)?;
         self.comms.delay.delay_ms(10);
