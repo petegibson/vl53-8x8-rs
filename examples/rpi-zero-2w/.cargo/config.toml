@@ -11,6 +11,6 @@ target = "aarch64-unknown-linux-gnu"
 # the target the `just` recipes use for the Pi. Its runner ships the binary
 # to the Pi over ssh and runs it there, which makes `cargo run` and
 # `cargo test --target aarch64-unknown-linux-musl` work from the dev shell
-# (PI_HOST selects the Pi, default `toftestpi`; see tools/pi-run.sh).
+# (PI_HOST selects the Pi, default `pi@toftestpi`; see tools/pi-run.sh).
 [target.aarch64-unknown-linux-musl]
 runner = "tools/pi-run.sh"

@@ -124,7 +124,7 @@ run-evo-uld features="":
 # The Pi recipes cross-compile static musl binaries; for that target the
 # crate's .cargo/config.toml installs tools/pi-run.sh as the cargo runner,
 # which copies the binary to the Pi over ssh and runs it there (PI_HOST,
-# default `toftestpi`). Features: "" = VL53L8CX/SPI, `i2c-bus` = VL53L5CX/I2C.
+# default `pi@toftestpi`). Features: "" = VL53L8CX/SPI, `i2c-bus` = VL53L5CX/I2C.
 
 pi_target := "aarch64-unknown-linux-musl"
 

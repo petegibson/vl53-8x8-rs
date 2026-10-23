@@ -157,7 +157,7 @@ static musl binaries run on any aarch64 Linux, NixOS included, with no
 [`tools/pi-run.sh`](./tools/pi-run.sh) as the cargo *runner*: it copies the
 binary to the Pi with `scp`, runs it there and returns its exit status, so
 `cargo run` and `cargo test` behave as if the Pi were local. `PI_HOST`
-names the ssh destination (default `toftestpi`); ssh keys must already work.
+names the ssh destination (default `pi@toftestpi`); ssh keys must already work.
 
 From the repository root:
 

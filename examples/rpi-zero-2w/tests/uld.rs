@@ -5,7 +5,7 @@
 //! Run on the Pi itself with `cargo test --test uld [--features i2c-bus]`, or
 //! from the dev shell with `just test-pi [i2c-bus]`, which cross-compiles for
 //! musl and runs the binary on the Pi over ssh (`PI_HOST`, default
-//! `toftestpi`). The tests share one sensor, so they take a process-wide lock
+//! `pi@toftestpi`). The tests share one sensor, so they take a process-wide lock
 //! and the remote runner also sets `RUST_TEST_THREADS=1`.
 //!
 //! Ported from `examples/evo-f412re-uld/tests/sensor.rs` /

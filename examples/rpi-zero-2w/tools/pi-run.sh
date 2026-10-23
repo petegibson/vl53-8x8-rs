@@ -5,14 +5,14 @@
 # local. Wired up in .cargo/config.toml for aarch64-unknown-linux-musl only;
 # building on the Pi itself never goes through here.
 #
-#   PI_HOST        ssh destination (default: toftestpi)
+#   PI_HOST        ssh destination (default: pi@toftestpi)
 #   PI_REMOTE_DIR  directory on the Pi for the binaries (default: ~/.cache/vl53-pi-run)
 #
 # Test binaries share one sensor, so RUST_TEST_THREADS=1 is forced on the Pi;
 # RUST_LOG is forwarded for the demo bins (default: info).
 set -euo pipefail
 
-host="${PI_HOST:-toftestpi}"
+host="${PI_HOST:-pi@toftestpi}"
 remote_dir="${PI_REMOTE_DIR:-.cache/vl53-pi-run}"
 bin="$1"
 shift
