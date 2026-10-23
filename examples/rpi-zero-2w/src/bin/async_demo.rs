@@ -1,26 +1,20 @@
-//! Async VL53L8CX example for a Pololu breakout on a Raspberry Pi Zero 2W.
+//! Async pure-Rust (`vl53-8x8`) example for a Pololu breakout on a Raspberry
+//! Pi Zero 2W: VL53L8CX over SPI0 by default, VL53L5CX over I2C1 with
+//! `--features i2c-bus` (see `lib.rs` for the wiring). The driver autodetects
+//! the part; the bin logs which one it found.
 //!
-//! Warning: **The SPI bus is *not* truly async.** `linux-embedded-hal`'s
-//! `SpidevDevice` only implements the *blocking* `embedded-hal` SPI traits
-//! (no `embedded-hal-async` impl exists upstream), so we wrap it in the
-//! `BlockingSpi` adapter from `lib.rs` to satisfy the async `SpiDevice`
-//! trait that `vl53-8x8` requires. Each transfer therefore **blocks
-//! the Tokio task** for its duration. Only the driver's internal
-//! `DelayNs` calls actually yield to the runtime.
-//!
-//! This is fine on the `current_thread` runtime used here. If you move
-//! the driver to a multi-threaded runtime and care about responsiveness
-//! for other tasks during the ~100 ms firmware upload, run the whole
-//! `sensor.init()` (and ideally each `get_ranging_data()` call) inside
-//! `tokio::task::spawn_blocking`.
+//! The bus is *not* truly async: `linux-embedded-hal` only implements the
+//! blocking `embedded-hal` traits, so transfers go through the driver's
+//! `BlockingSpi` / `BlockingI2c` adapters and block the Tokio task for their
+//! duration. Only the driver's `DelayNs` waits yield. That is fine on the
+//! `current_thread` runtime used here; on a multi-threaded runtime wrap the
+//! driver calls in `tokio::task::spawn_blocking`.
 
+use std::time::Instant;
 
 use anyhow::Context;
-use rpi_zero_2w::{
-    firmware_upload_secs, format_freq, open_lpn, open_spi, print_distance_grid, BlockingSpi,
-    TokioDelay, FIRMWARE_SIZE_KB, LPN_GPIO, SPI_DEVICE, SPI_FREQ_HZ, SPI_MODE_LABEL,
-};
-use vl53_8x8::{Resolution, Sensor};
+use rpi_zero_2w::native::{self, Resolution};
+use rpi_zero_2w::{bus_description, print_distance_grid, FIRMWARE_SIZE_KB, LPN_GPIO, SENSOR_LABEL};
 
 const RESOLUTION: Resolution = Resolution::Res4x4;
 const RANGING_FREQ_HZ: u8 = 10;
@@ -29,26 +23,23 @@ const RANGING_FREQ_HZ: u8 = 10;
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let freq = format_freq(SPI_FREQ_HZ);
-    log::info!("Opening {SPI_DEVICE} in {SPI_MODE_LABEL} at {freq}...");
-    let spi = open_spi().context("open SPI device — is `dtparam=spi=on` set in /boot/firmware/config.txt?")?;
+    log::info!("{SENSOR_LABEL}: opening {} with LPn on BCM GPIO{LPN_GPIO}...", bus_description());
+    let mut sensor = native::connect()?;
 
-    log::info!("Acquiring LPn on BCM GPIO{LPN_GPIO}...");
-    let lpn = open_lpn().context("open LPn — is the user in the gpio group, or run with sudo?")?;
-
-    let mut sensor = Sensor::new_spi(BlockingSpi(spi), TokioDelay).with_lpn_pin(lpn);
-
-    // open_lpn() leaves the line low; drive it high (comms enable). The Pololu
-    // board has no PWR_EN, so there is no power_cycle(); init() reboots the
-    // sensor in software.
-    sensor.lpn_enable().context("drive LPn high")?;
-
-    log::info!(
-        "Uploading firmware (~{FIRMWARE_SIZE_KB} KB, ~{:.1} s at {freq})...",
-        firmware_upload_secs()
+    anyhow::ensure!(
+        sensor.is_alive().await.context("probe the sensor")?,
+        "no sensor answered at the default address (wiring? bus mode selector? LPn high?)"
     );
+
+    log::info!("Uploading firmware (~{FIRMWARE_SIZE_KB} KB)...");
+    let started = Instant::now();
     sensor.init().await.context("sensor init / firmware upload")?;
-    log::info!("Sensor ready.");
+    log::info!(
+        "Sensor ready ({:.1} s), detected variant: {:?} (expected {:?}).",
+        started.elapsed().as_secs_f32(),
+        sensor.variant(),
+        native::EXPECTED_VARIANT
+    );
 
     let grid = match RESOLUTION {
         Resolution::Res4x4 => 4usize,

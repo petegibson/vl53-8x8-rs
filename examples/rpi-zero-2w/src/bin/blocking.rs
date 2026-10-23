@@ -1,20 +1,17 @@
-//! Blocking VL53L8CX example for a Pololu breakout on a Raspberry Pi Zero 2W.
+//! Blocking ST-ULD example for a Pololu breakout on a Raspberry Pi Zero 2W:
+//! VL53L8CX over SPI0 by default, VL53L5CX over I2C1 with `--features i2c-bus`
+//! (see `lib.rs` for the wiring).
 //!
 //! Run on the Pi (or after copying the cross-compiled binary):
 //!   cargo run --bin blocking
-//!   sudo ./target/debug/blocking      # if the user isn't in the spi/gpio groups
+//!   cargo run --bin blocking --features i2c-bus
+//!   sudo ./target/debug/blocking      # if the user isn't in the spi/i2c/gpio groups
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use rpi_zero_2w::{
-    firmware_upload_secs, format_freq, open_lpn, open_spi, print_distance_grid, LpnPin, SensorSpi,
-    StdDelay, FIRMWARE_SIZE_KB, LPN_GPIO, SPI_DEVICE, SPI_FREQ_HZ, SPI_MODE_LABEL,
-};
-use vl53l8cx_uld::{Resolution, Vl53l8cx};
-
-// Generate the ST-ULD platform callbacks bound to our chosen bus + delay type.
-vl53l8cx_uld::bind_platform_driver_spi!(SensorSpi, StdDelay);
+use rpi_zero_2w::uld::{self, Resolution};
+use rpi_zero_2w::{bus_description, print_distance_grid, FIRMWARE_SIZE_KB, LPN_GPIO, SENSOR_LABEL};
 
 const RESOLUTION: Resolution = Resolution::Res4x4;
 const RANGING_FREQ_HZ: u8 = 10;
@@ -22,26 +19,18 @@ const RANGING_FREQ_HZ: u8 = 10;
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let freq = format_freq(SPI_FREQ_HZ);
-    log::info!("Opening {SPI_DEVICE} in {SPI_MODE_LABEL} at {freq}...");
-    let spi: SensorSpi = open_spi().context("open SPI device — is `dtparam=spi=on` set in /boot/firmware/config.txt?")?;
+    log::info!("{SENSOR_LABEL}: opening {} with LPn on BCM GPIO{LPN_GPIO}...", bus_description());
+    let mut sensor = uld::connect()?;
 
-    log::info!("Acquiring LPn on BCM GPIO{LPN_GPIO}...");
-    let lpn: LpnPin = open_lpn().context("open LPn — is the user in the gpio group, or run with sudo?")?;
-
-    let mut sensor = Vl53l8cx::new_spi(spi, StdDelay).with_lpn_pin(lpn);
-
-    // open_lpn() leaves the line low; drive it high (comms enable). The Pololu
-    // board has no PWR_EN, so there is no power_cycle(); init() reboots the
-    // sensor in software.
-    sensor.lpn_enable().context("drive LPn high")?;
-
-    log::info!(
-        "Uploading firmware (~{FIRMWARE_SIZE_KB} KB, ~{:.1} s at {freq})...",
-        firmware_upload_secs()
+    anyhow::ensure!(
+        sensor.is_alive().context("probe the sensor")?,
+        "no sensor answered at the default address (wiring? bus mode selector? LPn high?)"
     );
+
+    log::info!("Uploading firmware (~{FIRMWARE_SIZE_KB} KB)...");
+    let started = Instant::now();
     sensor.init().context("sensor init / firmware upload")?;
-    log::info!("Sensor ready.");
+    log::info!("Sensor ready ({:.1} s).", started.elapsed().as_secs_f32());
 
     let grid = match RESOLUTION {
         Resolution::Res4x4 => 4usize,

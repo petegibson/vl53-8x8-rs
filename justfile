@@ -118,13 +118,36 @@ run-evo-uld features="":
     cd {{evo_uld}} && PROBE_RS_PROBE={{evo_probe}} timeout 25 cargo run --release --features "{{features}}" || true
 
 # ---------------------------------------------------------------------------
-# Raspberry Pi Zero 2W
+# Raspberry Pi Zero 2W (VL53L8CX on SPI0; VL53L5CX on I2C1 with `i2c-bus`)
 # ---------------------------------------------------------------------------
 
-# Build: static musl demo binaries to scp to the Pi (see its README)
+# The Pi recipes cross-compile static musl binaries; for that target the
+# crate's .cargo/config.toml installs tools/pi-run.sh as the cargo runner,
+# which copies the binary to the Pi over ssh and runs it there (PI_HOST,
+# default `toftestpi`). Features: "" = VL53L8CX/SPI, `i2c-bus` = VL53L5CX/I2C.
+
+pi_target := "aarch64-unknown-linux-musl"
+
+# Build: static musl demo binaries to scp to the Pi by hand (see its README)
 [group('pi-zero-2w')]
-build-pi:
-    cd {{rpi}} && cargo build --release --target aarch64-unknown-linux-musl
+build-pi features="":
+    cd {{rpi}} && cargo build --release --target {{pi_target}} --features "{{features}}"
+
+# Test: both Pi suites (ST ULD + vl53-8x8) on the Pi over ssh
+[group('pi-zero-2w')]
+test-pi features="":
+    cd {{rpi}} && cargo test --release --target {{pi_target}} --features "{{features}}"
+
+# Test: both Pi suites for both boards
+[group('pi-zero-2w')]
+test-pi-all:
+    just test-pi
+    just test-pi i2c-bus
+
+# Run: a demo bin on the Pi for 25 s (bin: async_demo | blocking)
+[group('pi-zero-2w')]
+run-pi bin="async_demo" features="":
+    cd {{rpi}} && timeout 25 cargo run --release --target {{pi_target}} --bin {{bin}} --features "{{features}}" || true
 
 # ---------------------------------------------------------------------------
 # all boards

@@ -6,3 +6,11 @@
 # CARGO_TARGET_*_LINKER env vars (see flake.nix).
 [build]
 target = "aarch64-unknown-linux-gnu"
+
+# Static musl builds run on any aarch64 Linux without patchelf, so that is
+# the target the `just` recipes use for the Pi. Its runner ships the binary
+# to the Pi over ssh and runs it there, which makes `cargo run` and
+# `cargo test --target aarch64-unknown-linux-musl` work from the dev shell
+# (PI_HOST selects the Pi, default `toftestpi`; see tools/pi-run.sh).
+[target.aarch64-unknown-linux-musl]
+runner = "tools/pi-run.sh"

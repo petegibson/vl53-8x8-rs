@@ -3,11 +3,12 @@ name = "rpi-zero-2w"
 version = "0.1.0"
 edition = "2021"
 license = "BSD-3-Clause"
-description = "Raspberry Pi Zero 2W VL53L8CX example driving a Pololu breakout via SPI0."
+description = "Raspberry Pi Zero 2W examples: a Pololu VL53L8CX breakout on SPI0 (default) or a Pololu VL53L5CX breakout on I2C1 (`i2c-bus`)."
 publish = false
 
 [dependencies]
 vl53l8cx-uld = { path = "../../vl53l8cx-uld" }
+vl53l5cx-uld = { path = "../../vl53l5cx-uld" }
 vl53-8x8 = { path = "../../vl53-8x8" }
 linux-embedded-hal = "0.4"
 embedded-hal = "1.0"
@@ -16,6 +17,27 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 anyhow = "1"
 env_logger = "0.11"
 log = "0.4"
+
+[features]
+# Which breakout the bins and tests talk to. Default: VL53L8CX on SPI0 with
+# LPn on BCM GPIO17. `i2c-bus`: VL53L5CX on I2C1 (/dev/i2c-1) with LPn on
+# BCM GPIO5. The ULD bin and test then use `vl53l5cx-uld` instead of
+# `vl53l8cx-uld`; the pure-Rust `vl53-8x8` driver autodetects the part.
+i2c-bus = []
+
+# Only the two `tests/` suites are tests; keep cargo from shipping empty
+# lib/bin test harnesses to the Pi through the remote runner.
+[lib]
+test = false
+doctest = false
+
+[[bin]]
+name = "blocking"
+test = false
+
+[[bin]]
+name = "async_demo"
+test = false
 
 # Standalone root: this demo is excluded from the parent workspace.
 [workspace]
