@@ -28,9 +28,16 @@ static HW: Mutex<()> = Mutex::new(());
 /// Open the bus and LPn (LPn high) without initialising the sensor.
 fn connect() -> (MutexGuard<'static, ()>, Driver) {
     let guard = HW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    #[cfg(feature = "i2c-bus")]
+    if rpi_zero_2w::recover_default_address(TEMP_ADDRESS).expect("probe for a stray address") {
+        eprintln!("moved a sensor left at {TEMP_ADDRESS:#04x} back to the default address");
+    }
     let sensor = uld::connect().expect("open the bus and LPn (device permissions? wiring?)");
     (guard, sensor)
 }
+
+/// Address used by `set_address_round_trip`.
+const TEMP_ADDRESS: u8 = 0x35;
 
 /// [`connect`] followed by `init()` (firmware upload).
 fn init() -> (MutexGuard<'static, ()>, Driver) {
@@ -48,14 +55,23 @@ fn wait_ready(sensor: &mut Driver) {
     }
 }
 
-/// Assert that the first target of each of the first `zones` zones has a
-/// plausible distance. Per-target arrays are laid out
+/// Assert that every zone whose first target is a valid return (ST status 5,
+/// or 6/9 for lower confidence) carries a plausible distance, and that at
+/// least three quarters of the first `zones` zones are valid. Zones looking
+/// at nothing (a corner past the ceiling, a dark absorber) legitimately
+/// report status 255 with distance 0. Per-target arrays are laid out
 /// `zone * NB_TARGET_PER_ZONE + target`.
 fn assert_zone_distances(data: &ResultsData, zones: usize) {
+    let mut valid = 0;
     for zone in 0..zones {
-        let d = data.distance_mm[zone * NB_TARGET_PER_ZONE];
-        assert!(d > 0 && d < 4000, "zone {zone} distance {d} mm out of range");
+        let i = zone * NB_TARGET_PER_ZONE;
+        let (d, s) = (data.distance_mm[i], data.target_status[i]);
+        if matches!(s, 5 | 6 | 9) {
+            assert!(d > 0 && d < 4000, "zone {zone} status {s} distance {d} mm out of range");
+            valid += 1;
+        }
     }
+    assert!(valid * 4 >= zones * 3, "only {valid}/{zones} zones have a valid target");
 }
 
 #[test]
@@ -275,7 +291,7 @@ fn vhv_repeat_count() {
 #[test]
 fn set_address_round_trip() {
     const DEFAULT: u8 = uld::DEFAULT_ADDRESS;
-    const TEMP: u8 = 0x35;
+    const TEMP: u8 = TEMP_ADDRESS;
     let (_hw, mut sensor) = connect();
 
     sensor.set_i2c_address(TEMP).unwrap();

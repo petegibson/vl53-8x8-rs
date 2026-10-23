@@ -84,13 +84,19 @@ pub const SPI_MODE_LABEL: &str = "Mode 3";
 /// I2C bus device (I2C1 on BCM GPIO2/GPIO3).
 pub const I2C_DEVICE: &str = "/dev/i2c-1";
 
-/// Largest single I2C message Linux's `i2c-dev` accepts through `I2C_RDWR`,
-/// in bytes including the two register-index bytes. Longer register writes
-/// (the 32 KB firmware chunks) are split by [`LinuxI2c`].
-pub const I2C_MAX_MSG_LEN: usize = 8192;
+/// Largest I2C register write [`LinuxI2c`] issues in one ioctl, in bytes
+/// including the two register-index bytes. Two kernel limits apply:
+/// `i2c-dev` rejects any message over 8192 bytes, and the BCM2835 I2C
+/// adapter aborts a whole `I2C_RDWR` call that takes longer than 1 s
+/// (`ETIMEDOUT`, errno 110). 4 KB is 0.37 s at 100 kHz, comfortably inside
+/// both; the 32 KB firmware chunks become eight such writes.
+pub const I2C_MAX_MSG_LEN: usize = 4096;
 
 /// Approximate firmware blob size in KiB (used by log messages).
 pub const FIRMWARE_SIZE_KB: u32 = 86;
+
+/// How long `connect()` holds LPn low before enabling comms.
+pub const LPN_HOLD_LOW: Duration = Duration::from_millis(10);
 
 // --- Concrete peripheral types ---
 
@@ -182,12 +188,14 @@ pub fn open_lpn_gpio(gpio: u32) -> anyhow::Result<LpnPin> {
 ///    write whose index is the first two data bytes. This adapter concatenates
 ///    adjacent writes into one message.
 /// 2. **Chunked long writes.** `i2c-dev` rejects any message longer than
-///    [`I2C_MAX_MSG_LEN`] (8192 bytes), and the firmware goes up in 32 KB
-///    register writes. A merged write over the limit is split into messages
-///    of at most 8192 bytes, each re-addressed with the running register
-///    index (the sensor auto-increments the index within a message, so the
-///    split is transparent to it; the pure-Rust driver uploads the patched
-///    VL53L5CX firmware in the same addressed-chunk fashion).
+///    8192 bytes and the BCM2835 adapter aborts any `I2C_RDWR` call that
+///    runs past 1 s, while the firmware goes up in 32 KB register writes. A
+///    merged write over [`I2C_MAX_MSG_LEN`] is split into writes of at most
+///    that size, each issued as its own ioctl and re-addressed with the
+///    running register index (the sensor auto-increments the index within a
+///    message, so the split is transparent to it; the pure-Rust driver
+///    uploads the patched VL53L5CX firmware in the same addressed-chunk
+///    fashion).
 ///
 /// Reads and write-then-read pairs are passed through unchanged, so a
 /// `write_read` keeps its repeated START.
@@ -205,13 +213,14 @@ impl embedded_hal::i2c::I2c for LinuxI2c {
     ) -> Result<(), Self::Error> {
         use embedded_hal::i2c::Operation;
 
-        enum Step {
+        enum Msg {
             Write(Vec<u8>),
             Read,
         }
 
-        // Pass 1: merge adjacent writes, split oversized ones.
-        let mut steps = Vec::with_capacity(operations.len());
+        // Pass 1: plan the ioctls. Adjacent writes merge into one message;
+        // an oversized merged write becomes a run of single-message ioctls.
+        let mut calls: Vec<Vec<Msg>> = vec![Vec::new()];
         let mut i = 0;
         while i < operations.len() {
             match operations[i] {
@@ -222,7 +231,7 @@ impl embedded_hal::i2c::I2c for LinuxI2c {
                         i += 1;
                     }
                     if buf.len() <= I2C_MAX_MSG_LEN {
-                        steps.push(Step::Write(buf));
+                        calls.last_mut().unwrap().push(Msg::Write(buf));
                     } else {
                         let index = u16::from_be_bytes([buf[0], buf[1]]);
                         let mut offset = 0usize;
@@ -230,32 +239,61 @@ impl embedded_hal::i2c::I2c for LinuxI2c {
                             let mut msg = Vec::with_capacity(chunk.len() + 2);
                             msg.extend_from_slice(&index.wrapping_add(offset as u16).to_be_bytes());
                             msg.extend_from_slice(chunk);
-                            steps.push(Step::Write(msg));
+                            calls.push(vec![Msg::Write(msg)]);
                             offset += chunk.len();
                         }
+                        calls.push(Vec::new());
                     }
                 }
                 Operation::Read(_) => {
-                    steps.push(Step::Read);
+                    calls.last_mut().unwrap().push(Msg::Read);
                     i += 1;
                 }
             }
         }
 
-        // Pass 2: issue the merged sequence as a single I2C_RDWR.
+        // Pass 2: issue each planned ioctl as one I2C_RDWR.
         let mut reads = operations.iter_mut().filter_map(|op| match op {
             Operation::Read(r) => Some(&mut **r),
             Operation::Write(_) => None,
         });
-        let mut merged: Vec<Operation<'_>> = Vec::with_capacity(steps.len());
-        for step in &steps {
-            match step {
-                Step::Write(buf) => merged.push(Operation::Write(buf)),
-                Step::Read => merged.push(Operation::Read(reads.next().expect("one read per planned read"))),
+        for call in &calls {
+            if call.is_empty() {
+                continue;
             }
+            let mut ops: Vec<Operation<'_>> = Vec::with_capacity(call.len());
+            for msg in call {
+                match msg {
+                    Msg::Write(buf) => ops.push(Operation::Write(buf)),
+                    Msg::Read => ops.push(Operation::Read(reads.next().expect("one read per planned read"))),
+                }
+            }
+            embedded_hal::i2c::I2c::transaction(&mut self.0, address, &mut ops)?;
         }
-        embedded_hal::i2c::I2c::transaction(&mut self.0, address, &mut merged)
+        Ok(())
     }
+}
+
+/// Put a sensor that an interrupted address test left at `stray` back at the
+/// default address. Probes `stray` only if nothing answers at the default
+/// (a page-select write, harmless), then sends ST's address-change sequence
+/// (`0x7FFF=0x00`, `0x0004=new address`, `0x7FFF=0x02`). Returns `true` if
+/// it moved the sensor. Used by the test suites' `connect()` so one failed
+/// run does not need a power cycle to recover.
+#[cfg(feature = "i2c-bus")]
+pub fn recover_default_address(stray: u8) -> anyhow::Result<bool> {
+    use embedded_hal::i2c::I2c;
+    const DEFAULT: u8 = vl53_8x8::DEFAULT_ADDRESS;
+    let mut bus = open_i2c()?;
+    if bus.write(DEFAULT, &[0x7F, 0xFF, 0x00]).is_ok() {
+        return Ok(false);
+    }
+    if bus.write(stray, &[0x7F, 0xFF, 0x00]).is_err() {
+        return Ok(false);
+    }
+    bus.write(stray, &[0x00, 0x04, DEFAULT]).context("write new address")?;
+    bus.write(DEFAULT, &[0x7F, 0xFF, 0x02]).context("restore page")?;
+    Ok(true)
 }
 
 // --- Delay providers ---
@@ -315,6 +353,10 @@ pub mod uld {
         let mut sensor = Vl53l8cx::new_spi(crate::open_spi()?, crate::StdDelay).with_lpn_pin(lpn);
         #[cfg(feature = "i2c-bus")]
         let mut sensor = Vl53l5cx::new(crate::open_i2c()?, crate::StdDelay).with_lpn_pin(lpn);
+        // open_lpn() leaves LPn low (comms disabled); hold it there briefly so a
+        // transaction a previous process aborted half-way is dropped by the
+        // sensor's I2C block before comms are re-enabled.
+        std::thread::sleep(crate::LPN_HOLD_LOW);
         sensor.lpn_enable().context("drive LPn high")?;
         Ok(sensor)
     }
@@ -362,6 +404,8 @@ pub mod native {
         #[cfg(feature = "i2c-bus")]
         let bus = vl53_8x8::BlockingI2c(crate::open_i2c()?);
         let mut sensor = Sensor::new(bus, crate::TokioDelay).with_lpn_pin(lpn);
+        // See `uld::connect`: a short LPn-low hold before enabling comms.
+        std::thread::sleep(crate::LPN_HOLD_LOW);
         sensor.lpn_enable().context("drive LPn high")?;
         Ok(sensor)
     }
