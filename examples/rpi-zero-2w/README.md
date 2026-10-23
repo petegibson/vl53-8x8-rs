@@ -222,13 +222,21 @@ musl build above.
 ```
 [INFO] VL53L5CX on I2C1: opening /dev/i2c-1 (...) with LPn on BCM GPIO5...
 [INFO] Uploading firmware (~86 KB)...
-[INFO] Sensor ready (2.1 s), detected variant: L5 (expected L5).
+[INFO] Sensor ready (8.3 s), detected variant: L5 (expected L5).
 [INFO] Ranging 4x4 @ 10 Hz. Ctrl-C to stop.
 --- Distance (mm) ---
-  840   855   860   850
-  820   810   790   795
-  ...
+ 1406  1470  1467   266
+ 1452  1472  1475   256
+ 1434  1468  1492   272
+ 1416  1460  1494   293
 ```
 
-Wave a hand in front of the sensor — center cells should drop from
-background distance to a few hundred millimetres.
+(8.3 s is the upload at the stock 100 kHz I2C clock; 400 kHz brings it to
+about 2 s, SPI at 2 MHz to under 0.5 s.) Wave a hand in front of the
+sensor — cells should drop from background distance to a few hundred
+millimetres.
+
+Verified 2026-10-23 on the maintainers' Pi Zero 2W with both boards fitted:
+`uld` and `sensor_async` pass 16/16 on the VL53L8CX over SPI and 18/18 and
+17/17 on the VL53L5CX over I2C (the extra tests are the LPn gating and the
+L5 charge-pump round trip).
