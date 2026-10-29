@@ -6,17 +6,24 @@
 # building on the Pi itself never goes through here.
 #
 #   PI_HOST        ssh destination (default: pi@toftestpi)
-#   PI_REMOTE_DIR  directory on the Pi for the binaries (default: ~/.cache/vl53-pi-run)
+#   PI_REMOTE_DIR  directory on the Pi for the binaries, relative to the ssh
+#                  user's home (default: vl53-pi-bins). This is the one place
+#                  binaries live on the Pi: the runner drops the latest build
+#                  of each bin/test here (cargo's hash suffix stripped, so
+#                  `uld`, `sensor_async`, `blocking`, `async_demo`), and
+#                  hand-copied builds go in the same folder with a `-l8-spi` /
+#                  `-l5-i2c` suffix for running with sudo.
 #
 # Test binaries share one sensor, so RUST_TEST_THREADS=1 is forced on the Pi;
 # RUST_LOG is forwarded for the demo bins (default: info).
 set -euo pipefail
 
 host="${PI_HOST:-pi@toftestpi}"
-remote_dir="${PI_REMOTE_DIR:-.cache/vl53-pi-run}"
+remote_dir="${PI_REMOTE_DIR:-vl53-pi-bins}"
 bin="$1"
 shift
-name="$(basename "$bin")"
+# tests/uld.rs builds to deps/uld-<16 hex>; keep just `uld`.
+name="$(basename "$bin" | sed -E 's/-[0-9a-f]{16}$//')"
 
 ssh -o BatchMode=yes "$host" "mkdir -p '$remote_dir'"
 scp -q "$bin" "$host:$remote_dir/$name"

@@ -159,6 +159,14 @@ binary to the Pi with `scp`, runs it there and returns its exit status, so
 `cargo run` and `cargo test` behave as if the Pi were local. `PI_HOST`
 names the ssh destination (default `pi@toftestpi`); ssh keys must already work.
 
+**Where binaries live on the Pi:** `~/vl53-pi-bins` (override with
+`PI_REMOTE_DIR`). The runner drops the latest build of each bin and test
+suite there under its plain name (`uld`, `sensor_async`, `blocking`,
+`async_demo`, cargo's hash suffix stripped). When something has to be run
+with sudo instead, copy the builds into the same folder with a board suffix,
+e.g. `uld-l5-i2c`, `sensor_async-l8-spi`, so both boards' binaries can sit
+side by side.
+
 From the repository root:
 
 ```bash
@@ -240,3 +248,22 @@ Verified 2026-10-23 on the maintainers' Pi Zero 2W with both boards fitted:
 `uld` and `sensor_async` pass 16/16 on the VL53L8CX over SPI and 18/18 and
 17/17 on the VL53L5CX over I2C (the extra tests are the LPn gating and the
 L5 charge-pump round trip).
+
+### VL53L7CX
+
+A Pololu VL53L7CX carrier is pin-compatible with the VL53L5CX one and runs
+with the same `i2c-bus` build: ST's L7 ULD is the L5 ULD renamed (identical
+firmware, configuration and xtalk tables, same revision id), so both drivers
+detect and drive it as an L5 and `init_detects_expected_variant` expects
+`L5`. Distances are plane-perpendicular on both parts (the lens geometry is
+handled inside the sensor): a flat ceiling reads flat across the grid.
+
+What does change is signal: the 60° lens spreads the same emitter power
+over about twice the area of the L5's 45°, so per-zone signal halves and the
+ranging tests use 20 ms integration (`INTEGRATION_MS`) and accept half the
+zones valid. On 2026-10-30 an L7 facing a 1.5 m ceiling next to a glass door
+in daylight (ambient 60–90 kcps/SPAD on one side) passed everything except
+`ranging_8x8`, which saw only 16–37 of 64 zones valid. Use
+`just report-pi-scene i2c-bus` to print distance, status, ambient and signal
+grids and pick a better scene (a wall, or after dark). Also peel the
+protective film off a new module.

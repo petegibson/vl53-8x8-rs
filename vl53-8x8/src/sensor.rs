@@ -98,7 +98,14 @@ pub const FW_NBTAR_RANGING_INDEX: usize = 107;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Variant {
-    /// VL53L5CX.
+    /// VL53L5CX, and the VL53L7CX. The L7 is an L5 die behind a wider lens
+    /// (60° instead of 45° square field of view): ST's VL53L7CX ULD carries
+    /// byte-identical firmware, configuration and xtalk tables and checks
+    /// for the same revision id (0x02), so the two cannot be told apart on
+    /// the bus and an L7 is detected and driven as `L5`. Reported distances
+    /// are plane-perpendicular on both (the lens geometry is handled inside
+    /// the sensor); only an application that maps zones to angles needs to
+    /// know which lens it has.
     L5,
     /// VL53L8CX.
     L8,

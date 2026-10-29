@@ -149,6 +149,11 @@ test-pi-all:
 run-pi bin="async_demo" features="":
     cd {{rpi}} && timeout 25 cargo run --release --target {{pi_target}} --bin {{bin}} --features "{{features}}" || true
 
+# Report: distance + target-status grids at 4x4 and 8x8 (5 ms and 20 ms integration)
+[group('pi-zero-2w')]
+report-pi-scene features="":
+    cd {{rpi}} && cargo test --release --target {{pi_target}} --features "{{features}}" --test sensor_async -- --ignored scene_report --nocapture
+
 # ---------------------------------------------------------------------------
 # all boards
 # ---------------------------------------------------------------------------
