@@ -263,7 +263,13 @@ over about twice the area of the L5's 45°, so per-zone signal halves and the
 ranging tests use 20 ms integration (`INTEGRATION_MS`) and accept half the
 zones valid. On 2026-10-30 an L7 facing a 1.5 m ceiling next to a glass door
 in daylight (ambient 60–90 kcps/SPAD on one side) passed everything except
-`ranging_8x8`, which saw only 16–37 of 64 zones valid. Use
-`just report-pi-scene i2c-bus` to print distance, status, ambient and signal
-grids and pick a better scene (a wall, or after dark). Also peel the
-protective film off a new module.
+`ranging_8x8`, which saw only 16–37 of 64 zones valid. With a cardboard box
+over the Pi (ambient 0–4 kcps/SPAD, lid at ~130 mm) all 64 zones were valid
+and both suites passed, 17/17 and 18/18. Under that box the L7 and the L8
+agreed within ~15 mm at the grid centre (143–147 vs 129–133 mm, different
+spots under a slightly tilted lid); the L7's outer zones read 105–118 mm
+because its 60° view reaches the box walls, which project to a shorter
+perpendicular distance, and the L8 returned about 4x the signal per SPAD.
+Use `just report-pi-scene [i2c-bus]` to print distance, status, ambient and
+signal grids when judging a scene. Also peel the protective film off a new
+module.
