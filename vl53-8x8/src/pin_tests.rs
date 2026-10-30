@@ -11,7 +11,9 @@ use std::rc::Rc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::bus::VlBusAsync;
-use crate::{Error, FirmwareError, MotionConfiguration, NoPin, Sensor};
+#[cfg(any(feature = "motion", feature = "thresholds"))]
+use crate::{Error, FirmwareError, MotionConfiguration};
+use crate::{NoPin, Sensor};
 use embedded_hal::digital::{ErrorType, OutputPin};
 use embedded_hal::i2c::SevenBitAddress;
 
