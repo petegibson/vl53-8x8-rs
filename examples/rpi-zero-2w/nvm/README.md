@@ -79,8 +79,13 @@ p_dev->module_type = fw_flags[1];
 and its changelog for 2.0.11 reads "Changed method used to set module_type
 so that it correctly distinguishes between L5 and L7 parts" (its earlier
 revision-id method mapped 0x01 to L5 and 0x02 to L7, which misfiles current
-L5CX silicon). MZ, MZEVO and MZPlus are ST's internal names for the L5, L7
-and L8 modules.
+L5CX silicon). `vl53lmz_api.h` defines `VL53LMZ_MODULE_TYPE_L5/L7/L8` as
+0/1/2 "as reported in the VL53LMZ_Configuration.module_type field", so MZ,
+MZEVO and MZPlus are ST's names for the L5, L7 and L8 modules. Note the
+limits of this reference: the package is documented for the VL53L7CH and
+VL53L8CH only; that its driver recognises L5 silicon (revision 0x01 or 0x02
+accepted by `vl53lmz_is_alive`, module type 0 decoded) is a fact of the code
+and changelog, not a support statement by ST.
 
 The same package shows how ST relates the parts: its single
 `VL53LMZ_FIRMWARE` is byte-identical to the VL53L8CX firmware (and to
