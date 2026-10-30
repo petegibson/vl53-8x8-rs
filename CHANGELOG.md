@@ -4,7 +4,7 @@ All notable changes to the published crates (`vl53-8x8`, `vl53l8cx-uld`,
 `vl53l5cx-uld`, `vl53-8x8-types`, `vl53l8cx-uld-sys`, `vl53l5cx-uld-sys`).
 The three drivers share one API shape and are versioned together.
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-10-30
 
 `vl53-8x8` 0.3.0; new crates `vl53l7cx-uld` 0.3.0 and `vl53l7cx-uld-sys`
 0.1.0. `vl53-8x8-types`, `vl53l8cx-uld`, `vl53l5cx-uld` and their sys crates
