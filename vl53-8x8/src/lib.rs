@@ -85,6 +85,9 @@ pub use results::MotionIndicator;
 /// target`.
 pub const NB_TARGET_PER_ZONE: usize = consts::NB_TARGET_PER_ZONE as usize;
 
+/// Size in bytes of the factory NVM block [`Sensor::read_nvm_data`] returns.
+pub const NVM_DATA_SIZE: usize = consts::VL53L8CX_NVM_DATA_SIZE as usize;
+
 #[cfg(feature = "thresholds")]
 pub use types::{
     DetectionThreshold, ThresholdMeasurement, ThresholdOperation, ThresholdType,
@@ -919,6 +922,21 @@ where
 
         self.bus.write_byte(self.address, 0x7FFF, 0x02).await.map_err(Error::Bus)?;
         Ok(())
+    }
+
+    /// Read the sensor's factory NVM block: [`NVM_DATA_SIZE`] (492) bytes,
+    /// the first 488 of which [`Sensor::init`] keeps and sends back to the
+    /// sensor as its per-zone offset calibration. ST does not document the
+    /// layout; what its `send_offset_data` reveals is a header with the DSS
+    /// settings at 0x10, a 64-entry `u32` signal grid at 0x3C and a 64-entry
+    /// `i16` range-offset grid at 0x140, offsets counted after byte-swapping
+    /// each 32-bit word. A diagnostic for comparing modules, not needed in
+    /// normal use. Call it between ranging sessions. `buf` must hold at least
+    /// [`NVM_DATA_SIZE`] bytes; the filled prefix is returned.
+    pub async fn read_nvm_data<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a [u8], Error<BUS::Error>> {
+        ops::read_nvm_data(&mut self.bus, self.address, &mut self.delay, &mut self.stdev.temp_buffer).await?;
+        buf[..NVM_DATA_SIZE].copy_from_slice(&self.stdev.temp_buffer[..NVM_DATA_SIZE]);
+        Ok(&buf[..NVM_DATA_SIZE])
     }
 
     /// Read the power mode. Default after [`Sensor::init`] is

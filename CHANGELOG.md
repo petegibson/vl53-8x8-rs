@@ -4,6 +4,15 @@ All notable changes to the published crates (`vl53-8x8`, `vl53l8cx-uld`,
 `vl53l5cx-uld`, `vl53-8x8-types`, `vl53l8cx-uld-sys`, `vl53l5cx-uld-sys`).
 The three drivers share one API shape and are versioned together.
 
+## Unreleased
+
+- `vl53-8x8`: `Sensor::read_nvm_data` and `NVM_DATA_SIZE` expose the 492-byte
+  factory NVM block (per-zone offset calibration) that `init` fetches, for
+  diagnostics and module comparison. `init`'s bus traffic is unchanged.
+- `vl53-8x8`: `Variant::L5` documents that a VL53L7CX is detected and driven
+  as an L5 (ST's L7 ULD is byte-identical in firmware, configuration and
+  xtalk and checks the same revision id); verified on hardware.
+
 ## 0.2.0 — 2026-10-19
 
 Drivers: `vl53-8x8`, `vl53l8cx-uld`, `vl53l5cx-uld` 0.2.0. Types:

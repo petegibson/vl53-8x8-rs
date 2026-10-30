@@ -154,6 +154,11 @@ run-pi bin="async_demo" features="":
 report-pi-scene features="":
     cd {{rpi}} && cargo test --release --target {{pi_target}} --features "{{features}}" --test sensor_async -- --ignored scene_report --nocapture
 
+# Report: hex dump + decoded offset calibration of the sensor's factory NVM block
+[group('pi-zero-2w')]
+report-pi-nvm features="":
+    cd {{rpi}} && cargo test --release --target {{pi_target}} --features "{{features}}" --test sensor_async -- --ignored nvm_report --nocapture
+
 # ---------------------------------------------------------------------------
 # all boards
 # ---------------------------------------------------------------------------

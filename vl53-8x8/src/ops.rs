@@ -238,6 +238,42 @@ pub async fn dci_replace<BUS: VlBusAsync, D: DelayNs>(
     Ok(())
 }
 
+/// Read the sensor's factory NVM block into `temp_buf[..VL53L8CX_NVM_DATA_SIZE]`
+/// (492 bytes): ST's `GET_NVM_CMD` at 0x2FD8, poll `UI_CMD_STATUS` for 0x02,
+/// then read the answer at `UI_CMD_START`. `init_sensor` keeps the first
+/// `VL53L8CX_OFFSET_BUFFER_SIZE` (488) bytes as the per-zone offset
+/// calibration it sends back with [`send_offset_data`]. `temp_buf` doubles as
+/// the poll scratch buffer, so it is overwritten whole.
+pub async fn read_nvm_data<BUS: VlBusAsync, D: DelayNs>(
+    bus: &mut BUS,
+    addr: SevenBitAddress,
+    delay: &mut D,
+    temp_buf: &mut [u8],
+) -> Result<(), Error<BUS::Error>> {
+    bus.write(addr, 0x2FD8, &GET_NVM_CMD)
+        .await
+        .map_err(Error::Bus)?;
+    poll_for_answer(
+        bus,
+        addr,
+        delay,
+        temp_buf,
+        4,
+        0,
+        VL53L8CX_UI_CMD_STATUS,
+        0xFF,
+        0x02,
+    )
+    .await?;
+    bus.read(
+        addr,
+        VL53L8CX_UI_CMD_START,
+        &mut temp_buf[..VL53L8CX_NVM_DATA_SIZE as usize],
+    )
+    .await
+    .map_err(Error::Bus)
+}
+
 /// Send offset data gathered from NVM.
 pub async fn send_offset_data<BUS: VlBusAsync, D: DelayNs>(
     bus: &mut BUS,
@@ -701,29 +737,7 @@ pub async fn init_sensor<BUS: VlBusAsync, D: DelayNs>(
     }
 
     // Get offset NVM data
-    let nvm_cmd = &GET_NVM_CMD;
-    bus.write(addr, 0x2FD8, nvm_cmd)
-        .await
-        .map_err(Error::Bus)?;
-    poll_for_answer(
-        bus,
-        addr,
-        delay,
-        &mut stdev.temp_buffer,
-        4,
-        0,
-        VL53L8CX_UI_CMD_STATUS,
-        0xFF,
-        0x02,
-    )
-    .await?;
-    bus.read(
-        addr,
-        VL53L8CX_UI_CMD_START,
-        &mut stdev.temp_buffer[..VL53L8CX_NVM_DATA_SIZE as usize],
-    )
-    .await
-    .map_err(Error::Bus)?;
+    read_nvm_data(bus, addr, delay, &mut stdev.temp_buffer).await?;
     stdev.offset_data[..VL53L8CX_OFFSET_BUFFER_SIZE as usize]
         .copy_from_slice(&stdev.temp_buffer[..VL53L8CX_OFFSET_BUFFER_SIZE as usize]);
     send_offset_data(

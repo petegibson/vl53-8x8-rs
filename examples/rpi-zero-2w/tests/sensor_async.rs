@@ -348,6 +348,58 @@ async fn lpn_gates_i2c() {
     sensor.stop_ranging().await.unwrap();
 }
 
+/// Report (never fails): hex-dump the sensor's 492-byte factory NVM block and
+/// decode the per-zone offset calibration ST's init sends back (8x8 signal
+/// grid and range offsets). Reads it twice to show it is stable. Capture the
+/// output per module under `nvm/` to compare parts. Run with
+/// `just report-pi-nvm [i2c-bus]`.
+#[ignore]
+#[tokio::test(flavor = "current_thread")]
+async fn nvm_report() {
+    let (_hw, mut sensor) = init().await;
+    let mut buf = [0u8; native::NVM_DATA_SIZE];
+    let mut again = [0u8; native::NVM_DATA_SIZE];
+    sensor.read_nvm_data(&mut buf).await.unwrap();
+    sensor.read_nvm_data(&mut again).await.unwrap();
+    // Leading newline: with --nocapture libtest has already printed
+    // "test nvm_report ... " without a line break.
+    eprintln!(
+        "\nvariant: {:?}, nvm {} bytes, second read identical: {}",
+        sensor.variant(),
+        buf.len(),
+        buf == again
+    );
+    for (i, chunk) in buf.chunks(16).enumerate() {
+        let hex: Vec<String> = chunk.iter().map(|b| format!("{b:02x}")).collect();
+        eprintln!("{:04x}: {}", i * 16, hex.join(" "));
+    }
+    // Decode as send_offset_data does: byte-swap each 32-bit word of the first 488 bytes.
+    let mut sw = buf[..488].to_vec();
+    for w in sw.chunks_mut(4) {
+        w.reverse();
+    }
+    eprintln!("range offsets (i16, 8x8, word-swapped block @0x140):");
+    for row in 0..8 {
+        let v: Vec<String> = (0..8)
+            .map(|c| {
+                let o = 0x140 + (row * 8 + c) * 2;
+                format!("{:>6}", i16::from_le_bytes([sw[o], sw[o + 1]]))
+            })
+            .collect();
+        eprintln!("  {}", v.join(" "));
+    }
+    eprintln!("signal grid (u32, 8x8, word-swapped block @0x3C):");
+    for row in 0..8 {
+        let v: Vec<String> = (0..8)
+            .map(|c| {
+                let o = 0x3C + (row * 8 + c) * 4;
+                format!("{:>8}", u32::from_le_bytes([sw[o], sw[o + 1], sw[o + 2], sw[o + 3]]))
+            })
+            .collect();
+        eprintln!("  {}", v.join(" "));
+    }
+}
+
 /// Report (never fails): print one distance grid and one target-status grid
 /// at 4x4 and at 8x8 with the default 5 ms integration and with 20 ms, so a
 /// scene or a new part can be eyeballed. A flat ceiling should read flat
