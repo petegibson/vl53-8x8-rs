@@ -924,6 +924,24 @@ where
         Ok(())
     }
 
+    /// Raw DCI read: fetch `buf.len()` bytes of the firmware's data block at
+    /// `index` (the ULD's `dci_read_data`). An escape hatch for registers this
+    /// API does not wrap, such as ST's undocumented block at 0xE0C4 that the
+    /// VL53L8CX ULD polls for laser-safety faults. `buf` must be at most 4084
+    /// bytes and the sensor must be initialised and not ranging.
+    pub async fn dci_read(&mut self, index: u16, buf: &mut [u8]) -> Result<(), Error<BUS::Error>> {
+        ops::dci_read(
+            &mut self.bus,
+            self.address,
+            &mut self.delay,
+            &mut self.stdev.temp_buffer,
+            buf,
+            index as u32,
+            buf.len() as u16,
+        )
+        .await
+    }
+
     /// Read the sensor's factory NVM block: [`NVM_DATA_SIZE`] (492) bytes,
     /// the first 488 of which [`Sensor::init`] keeps and sends back to the
     /// sensor as its per-zone offset calibration. ST does not document the

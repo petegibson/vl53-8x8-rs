@@ -160,6 +160,11 @@ report-pi-scene features="":
 report-pi-nvm features="":
     cd {{rpi}} && cargo test --release --target {{pi_target}} --features "{{features}}" --test sensor_async -- --ignored nvm_report --nocapture
 
+# Report: the firmware's DCI block at 0xE0C4 (L8 laser-safety flag; LMZ "module type" byte)
+[group('pi-zero-2w')]
+report-pi-dci features="":
+    cd {{rpi}} && cargo test --release --target {{pi_target}} --features "{{features}}" --test sensor_async -- --ignored dci_probe_report --nocapture
+
 # ---------------------------------------------------------------------------
 # all boards
 # ---------------------------------------------------------------------------

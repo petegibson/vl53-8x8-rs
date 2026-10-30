@@ -408,6 +408,23 @@ async fn lpn_gates_i2c() {
     sensor.stop_ranging().await.unwrap();
 }
 
+/// Report (never fails): dump the firmware's DCI block at 0xE0C4. The
+/// VL53L8CX ULD reads 8 bytes there and treats byte 6 as the laser-safety
+/// fault flag; ST's VL53LMZ ULD (VL53L7CH/VL53L8CH) names 0xE0C5, byte 1 of
+/// the same block, `MODULE_TYPE_IDX`. Printed for each board so the values
+/// can be compared across L5, L7 and L8. Run with `just report-pi-dci
+/// [i2c-bus]`.
+#[ignore]
+#[tokio::test(flavor = "current_thread")]
+async fn dci_probe_report() {
+    let (_hw, mut sensor) = init().await;
+    let mut block = [0u8; 8];
+    sensor.dci_read(0xE0C4, &mut block).await.unwrap();
+    let hex: Vec<String> = block.iter().map(|b| format!("{b:02x}")).collect();
+    eprintln!("\nvariant: {:?}, DCI 0xE0C4..0xE0CC: {}", sensor.variant(), hex.join(" "));
+    eprintln!("  byte 1 (LMZ MODULE_TYPE_IDX 0xE0C5) = {:#04x}, byte 6 (L8 laser-safety flag) = {:#04x}", block[1], block[6]);
+}
+
 /// Report (never fails): hex-dump the sensor's 492-byte factory NVM block and
 /// decode the per-zone offset calibration ST's init sends back (8x8 signal
 /// grid and range offsets). Reads it twice to show it is stable. Capture the

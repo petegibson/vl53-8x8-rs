@@ -9,6 +9,8 @@ The three drivers share one API shape and are versioned together.
 - `vl53-8x8`: `Sensor::read_nvm_data` and `NVM_DATA_SIZE` expose the 492-byte
   factory NVM block (per-zone offset calibration) that `init` fetches, for
   diagnostics and module comparison. `init`'s bus traffic is unchanged.
+- `vl53-8x8`: `Sensor::dci_read` gives raw access to the firmware's DCI data
+  blocks (the ULD's `dci_read_data`) for registers the API does not wrap.
 - `vl53-8x8`: `Variant::L5` documents that a VL53L7CX is detected and driven
   as an L5 (ST's L7 ULD is byte-identical in firmware, configuration and
   xtalk and checks the same revision id); verified on hardware.

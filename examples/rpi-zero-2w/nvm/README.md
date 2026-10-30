@@ -49,7 +49,28 @@ The range offsets are per-device and overlap between parts. The 16th `i16`
 is far from the other fifteen on all three modules, so it is probably not a
 zone offset but another field sharing the block.
 
-The signal grid does separate the three modules, and in the ratios the
+## Module type at DCI 0xE0C5
+
+The firmware itself knows which module it runs on. ST's VL53LMZ ULD (the
+VL53L7CH/VL53L8CH driver) defines `VL53LMZ_MODULE_TYPE_IDX = 0xE0C5`, byte 1
+of the 8-byte DCI block at 0xE0C4 that the VL53L8CX ULD polls for its
+laser-safety flag (byte 6). Read after `init()` with `Sensor::dci_read`
+(`just report-pi-dci [i2c-bus]`, 2026-10-30):
+
+| Module | DCI 0xE0C4..0xE0CB | byte 1 |
+| --- | --- | --- |
+| VL53L5CX | `00 00 00 00 00 00 00 00` | 0x00 = `VL53LMZ_MODULE_TYPE_L5` |
+| VL53L7CX | `00 01 00 00 00 00 00 00` | 0x01 = `VL53LMZ_MODULE_TYPE_L7` |
+| VL53L8CX | `00 02 00 00 00 00 00 00` | 0x02 = `VL53LMZ_MODULE_TYPE_L8` |
+
+So an L5 and an L7, indistinguishable by device/revision id (both 0xF0 /
+0x02) and uploaded the same firmware, can be told apart once that firmware
+is running. One module of each so far; the values match ST's constants
+exactly, which is good evidence this is what the byte means.
+
+## Calibration signal
+
+The signal grid also separates the three modules, and in the ratios the
 optics predict: the L7's calibration signal is about half the L5's (its 60°
 lens spreads the emitter over roughly twice the area of the 45° lens), and
 the L8's about 3x the L5's (brighter emitter, longer rated range). With one
