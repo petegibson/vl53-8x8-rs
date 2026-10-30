@@ -6,8 +6,20 @@ The three drivers share one API shape and are versioned together.
 
 ## 0.3.0 — unreleased
 
-`vl53-8x8` 0.3.0. `vl53-8x8-types`, `vl53l8cx-uld`, `vl53l5cx-uld` and the
-sys crates are unchanged.
+`vl53-8x8` 0.3.0; new crates `vl53l7cx-uld` 0.3.0 and `vl53l7cx-uld-sys`
+0.1.0. `vl53-8x8-types`, `vl53l8cx-uld`, `vl53l5cx-uld` and their sys crates
+are unchanged.
+
+### New: `vl53l7cx-uld` and `vl53l7cx-uld-sys`
+
+ST's VL53L7CX ULD (STSW-IMG036 2.0.1) behind the same blocking wrapper API as
+`vl53l5cx-uld` and `vl53l8cx-uld` (`Vl53l7cx`, `bind_platform_driver!`,
+`vl53l7cx_platform_*` symbols). ST's L7CX package is today byte-identical to
+the L5CX one in firmware and tables, so `vl53l5cx-uld` would drive an L7, but
+ST versions the two independently; this crate follows the L7CX package. The
+sys crate corrects one typo in ST's header (`vl53ll7cx_*_internal_cp`) so the
+charge-pump functions bind. `vl53-8x8`'s oracle tests pin the L7 arrays to
+the L5 ones. Verified on a Pololu VL53L7CX on the Raspberry Pi example.
 
 ### VL53L7CX support (breaking: `Variant` gains a member)
 

@@ -1,0 +1,49 @@
+[package]
+name = "vl53l7cx-uld"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.81"
+license = "BSD-3-Clause"
+description = "Blocking embedded-hal wrapper over STMicroelectronics' VL53L7CX Ultra Lite Driver (ULD) C library"
+documentation = "https://docs.rs/vl53l7cx-uld"
+repository = "https://github.com/petegibson/vl53-8x8-rs"
+readme = "README.md"
+keywords = ["vl53l7cx", "tof", "embedded-hal", "no-std", "uld"]
+categories = ["embedded", "no-std", "hardware-support"]
+
+[package.metadata.docs.rs]
+features = ["xtalk", "motion", "thresholds"]
+
+[dependencies]
+embedded-hal = "1.0.0" # Using the stable 1.0 version of the hardware abstraction layer.
+vl53l7cx-uld-sys = { path = "../vl53l7cx-uld-sys", version = "0.1.0" }
+# Re-exported through the sys crate; named here for the 0.1.1 floor (`MaybeOutputPin`).
+vl53-8x8-types = { path = "../vl53-8x8-types", version = "0.1.1" }
+defmt = { version = "1", optional = true }
+
+[features]
+default = []
+
+xtalk = ["vl53l7cx-uld-sys/xtalk"]
+motion = ["vl53l7cx-uld-sys/motion"]
+thresholds = ["vl53l7cx-uld-sys/thresholds"]
+raw-format = ["vl53l7cx-uld-sys/raw-format"]
+
+# Targets per zone (`VL53L7CX_NB_TARGET_PER_ZONE`): exactly one may be enabled,
+# `targets-1` is the default. Per-target result arrays then hold `64 * N`
+# entries indexed `zone * NB_TARGET_PER_ZONE + target`.
+targets-1 = ["vl53l7cx-uld-sys/targets-1"]
+targets-2 = ["vl53l7cx-uld-sys/targets-2"]
+targets-3 = ["vl53l7cx-uld-sys/targets-3"]
+targets-4 = ["vl53l7cx-uld-sys/targets-4"]
+
+# Output disablement features for size optimization (opt-in to DISABLE/remove)
+disable-ambient = ["vl53l7cx-uld-sys/disable-ambient"]
+disable-spads = ["vl53l7cx-uld-sys/disable-spads"]
+disable-nb-targets = ["vl53l7cx-uld-sys/disable-nb-targets"]
+disable-signal = ["vl53l7cx-uld-sys/disable-signal"]
+disable-range-sigma = ["vl53l7cx-uld-sys/disable-range-sigma"]
+disable-distance = ["vl53l7cx-uld-sys/disable-distance"]
+disable-target-status = ["vl53l7cx-uld-sys/disable-target-status"]
+disable-reflectance = ["vl53l7cx-uld-sys/disable-reflectance"]
+disable-motion-indicator-output = ["vl53l7cx-uld-sys/disable-motion-indicator-output"]

@@ -3,8 +3,10 @@ members = [
     "vl53-8x8-types",
     "vl53l8cx-uld-sys",
     "vl53l5cx-uld-sys",
+    "vl53l7cx-uld-sys",
     "vl53l8cx-uld",
     "vl53l5cx-uld",
+    "vl53l7cx-uld",
     "vl53-8x8",
     "differential-tests",
 ]

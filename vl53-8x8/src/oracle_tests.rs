@@ -635,3 +635,66 @@ mod l5 {
         );
     }
 }
+
+/// VL53L7CX oracle: ST's L7 ULD (`vl53l7cx-uld-sys`, STSW-IMG036 2.0.1).
+/// The driver reports an L7 as [`crate::Variant::L7`] but drives it with the
+/// L5 tables, on the strength of the L7 ULD being byte-identical to the L5
+/// one in every array the driver uploads. These tests are the guard for that:
+/// if a future ST release gives the L7 its own firmware or configuration bytes,
+/// they fail and the L7 needs a patch set of its own.
+#[cfg(test)]
+mod l7_oracle {
+    use crate::firmware::{FirmwareSource, PatchedFirmware, BASE_FIRMWARE};
+    use crate::sensor::{Variant, L5_FW_PATCH};
+    use crate::uld_data;
+    use vl53l5cx_uld_sys as l5;
+    use vl53l7cx_uld_sys as l7;
+
+    #[test]
+    fn l7_firmware_is_the_l5_firmware() {
+        let (l7_fw, l5_fw) = unsafe { (&l7::VL53L7CX_FIRMWARE, &l5::VL53L5CX_FIRMWARE) };
+        assert!(l7_fw[..] == l5_fw[..], "ST's VL53L7CX firmware no longer equals the VL53L5CX firmware");
+    }
+
+    /// The image the driver uploads for an L7 (base + L5 patch) is ST's L7 image.
+    #[test]
+    fn l7_variant_uploads_st_l7_firmware() {
+        let l7_fw = unsafe { &l7::VL53L7CX_FIRMWARE };
+        assert_eq!(Variant::L7.info().fw_patch, L5_FW_PATCH);
+        let mut fw = PatchedFirmware::new(BASE_FIRMWARE, Variant::L7.info().fw_patch);
+        let mut out = std::vec::Vec::with_capacity(l7_fw.len());
+        let mut off = 0;
+        while off < l7_fw.len() {
+            let chunk = fw.chunk(off, l7_fw.len() - off);
+            out.extend_from_slice(chunk);
+            off += chunk.len();
+        }
+        assert!(out[..] == l7_fw[..], "patched base image does not reproduce ST's VL53L7CX firmware");
+    }
+
+    #[test]
+    fn l7_configuration_xtalk_and_nvm_tables_are_the_l5_ones() {
+        let (l7c, l5c) = unsafe { (&l7::VL53L7CX_DEFAULT_CONFIGURATION, &l5::VL53L5CX_DEFAULT_CONFIGURATION) };
+        assert!(l7c[..] == l5c[..], "ST's VL53L7CX default configuration no longer equals the VL53L5CX one");
+        let (l7x, l5x) = unsafe { (&l7::VL53L7CX_DEFAULT_XTALK, &l5::VL53L5CX_DEFAULT_XTALK) };
+        assert!(l7x[..] == l5x[..], "VL53L7CX default xtalk differs from the VL53L5CX one");
+        let (l7n, l5n) = unsafe { (&l7::VL53L7CX_GET_NVM_CMD, &l5::VL53L5CX_GET_NVM_CMD) };
+        assert!(l7n[..] == l5n[..], "VL53L7CX NVM command differs from the VL53L5CX one");
+        assert!(uld_data::DEFAULT_XTALK[..] == l7x[..]);
+        assert!(uld_data::GET_NVM_CMD[..] == l7n[..]);
+    }
+
+    /// Same register map and buffer sizes, so one `consts` table serves the L7 too.
+    #[test]
+    fn l7_register_map_matches_l5() {
+        assert_eq!(l7::VL53L7CX_UI_CMD_STATUS, l5::VL53L5CX_UI_CMD_STATUS);
+        assert_eq!(l7::VL53L7CX_UI_CMD_START, l5::VL53L5CX_UI_CMD_START);
+        assert_eq!(l7::VL53L7CX_UI_CMD_END, l5::VL53L5CX_UI_CMD_END);
+        assert_eq!(l7::VL53L7CX_DCI_ZONE_CONFIG, l5::VL53L5CX_DCI_ZONE_CONFIG);
+        assert_eq!(l7::VL53L7CX_DCI_OUTPUT_CONFIG, l5::VL53L5CX_DCI_OUTPUT_CONFIG);
+        assert_eq!(l7::VL53L7CX_DCI_INTERNAL_CP, l5::VL53L5CX_DCI_INTERNAL_CP);
+        assert_eq!(l7::VL53L7CX_NVM_DATA_SIZE, l5::VL53L5CX_NVM_DATA_SIZE);
+        assert_eq!(l7::VL53L7CX_OFFSET_BUFFER_SIZE, l5::VL53L5CX_OFFSET_BUFFER_SIZE);
+        assert_eq!(l7::VL53L7CX_XTALK_BUFFER_SIZE, l5::VL53L5CX_XTALK_BUFFER_SIZE);
+    }
+}

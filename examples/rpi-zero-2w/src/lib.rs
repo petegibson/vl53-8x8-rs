@@ -412,19 +412,25 @@ pub mod uld {
 
     #[cfg(not(feature = "i2c-bus"))]
     pub use vl53l8cx_uld::*;
-    #[cfg(feature = "i2c-bus")]
+    #[cfg(all(feature = "i2c-bus", not(feature = "l7-uld")))]
     pub use vl53l5cx_uld::*;
+    #[cfg(feature = "l7-uld")]
+    pub use vl53l7cx_uld::*;
 
     #[cfg(not(feature = "i2c-bus"))]
     vl53l8cx_uld::bind_platform_driver_spi!(crate::SensorSpi, crate::StdDelay);
-    #[cfg(feature = "i2c-bus")]
+    #[cfg(all(feature = "i2c-bus", not(feature = "l7-uld")))]
     vl53l5cx_uld::bind_platform_driver!(crate::SensorI2c, crate::StdDelay);
+    #[cfg(feature = "l7-uld")]
+    vl53l7cx_uld::bind_platform_driver!(crate::SensorI2c, crate::StdDelay);
 
     /// The blocking ULD wrapper over this build's bus, with LPn attached.
     #[cfg(not(feature = "i2c-bus"))]
     pub type Driver = Vl53l8cx<Vl53l8cxSpiDevice<crate::SensorSpi>, crate::StdDelay, crate::LpnPin>;
-    #[cfg(feature = "i2c-bus")]
+    #[cfg(all(feature = "i2c-bus", not(feature = "l7-uld")))]
     pub type Driver = Vl53l5cx<crate::SensorI2c, crate::StdDelay, crate::LpnPin>;
+    #[cfg(feature = "l7-uld")]
+    pub type Driver = Vl53l7cx<crate::SensorI2c, crate::StdDelay, crate::LpnPin>;
 
     /// Open the bus and LPn, raise LPn (comms enable) and return the driver,
     /// not yet initialised. The Pololu boards have no power-enable pin, so
@@ -433,8 +439,10 @@ pub mod uld {
         let lpn = crate::open_lpn().context("open LPn")?;
         #[cfg(not(feature = "i2c-bus"))]
         let mut sensor = Vl53l8cx::new_spi(crate::open_spi()?, crate::StdDelay).with_lpn_pin(lpn);
-        #[cfg(feature = "i2c-bus")]
+        #[cfg(all(feature = "i2c-bus", not(feature = "l7-uld")))]
         let mut sensor = Vl53l5cx::new(crate::open_i2c()?, crate::StdDelay).with_lpn_pin(lpn);
+        #[cfg(feature = "l7-uld")]
+        let mut sensor = Vl53l7cx::new(crate::open_i2c()?, crate::StdDelay).with_lpn_pin(lpn);
         crate::finish_connect(|| sensor.lpn_enable())?;
         Ok(sensor)
     }

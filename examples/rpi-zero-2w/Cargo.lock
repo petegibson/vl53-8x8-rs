@@ -600,6 +600,7 @@ dependencies = [
  "tokio",
  "vl53-8x8",
  "vl53l5cx-uld",
+ "vl53l7cx-uld",
  "vl53l8cx-uld",
 ]
 
@@ -792,6 +793,25 @@ dependencies = [
 
 [[package]]
 name = "vl53l5cx-uld-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cty",
+ "vl53-8x8-types",
+]
+
+[[package]]
+name = "vl53l7cx-uld"
+version = "0.3.0"
+dependencies = [
+ "embedded-hal",
+ "vl53-8x8-types",
+ "vl53l7cx-uld-sys",
+]
+
+[[package]]
+name = "vl53l7cx-uld-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",

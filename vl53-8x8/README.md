@@ -13,14 +13,15 @@ with nothing more than a Rust toolchain. Its only runtime dependencies are
 
 | Crate              | Role                                                      |
 | ------------------ | --------------------------------------------------------- |
-| `vl53-8x8`         | this crate: pure-Rust async driver, VL53L5CX + VL53L8CX   |
+| `vl53-8x8`         | this crate: pure-Rust async driver, VL53L5CX, VL53L7CX + VL53L8CX |
 | `vl53-8x8-types`   | shared enums and `Error`; re-exported here                |
-| `vl53l8cx-uld-sys` | bindgen + cc over ST's VL53L8CX ULD; here only a test oracle |
-| `vl53l8cx-uld`     | blocking wrapper over the C ULD (VL53L8CX only)           |
+| `vl53l8cx-uld-sys`, `vl53l5cx-uld-sys`, `vl53l7cx-uld-sys` | bindgen + cc over ST's ULDs; here only test oracles |
+| `vl53l8cx-uld`, `vl53l5cx-uld`, `vl53l7cx-uld` | blocking wrappers over the C ULDs, one per part |
 
-`vl53l8cx-uld-sys` is a **dev-dependency**: the oracle tests compare this
-crate's constants, data tables and `ResultsData` layout against the C build.
-Downstream users never pull it in and never need libclang.
+The three sys crates are **dev-dependencies**: the oracle tests compare this
+crate's constants, data tables and `ResultsData` layout against the L8 C
+build, its L5 patches against ST's L5 arrays, and pin ST's L7 arrays to the
+L5 ones. Downstream users never pull them in and never need libclang.
 
 ## Variant detection and firmware
 

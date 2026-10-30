@@ -85,6 +85,10 @@ address afterwards; it skips when no board answers on GPIO6. A board left
 at 0x2A or 0x35 by an interrupted run is moved back by the next
 `connect()` (`STRAY_ADDRESSES`).
 
+The `l7-uld` feature (implies `i2c-bus`) swaps the ULD bin and suite from
+`vl53l5cx-uld` to `vl53l7cx-uld`, ST's VL53L7CX package behind the same API;
+`VL53_LPN_GPIO=6 just test-pi l7-uld` runs it on the L7 board.
+
 ## Pi setup (one-time)
 
 ### Enable the buses

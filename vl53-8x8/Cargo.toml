@@ -29,6 +29,10 @@ vl53l8cx-uld-sys = { path = "../vl53l8cx-uld-sys", version = "0.1.0" }
 # (Cargo strips path-only dev-dependencies from the published manifest). Lets
 # the tests check the L5 firmware/config patches against ST's real L5 arrays.
 vl53l5cx-uld-sys = { path = "../vl53l5cx-uld-sys" }
+# VL53L7CX oracle: ST's L7 ULD. Its tests pin the L7 arrays to the L5 ones,
+# so a future ST release that makes the L7 diverge fails loudly here instead
+# of in the field (the driver drives an L7 with the L5 tables).
+vl53l7cx-uld-sys = { path = "../vl53l7cx-uld-sys" }
 
 [features]
 default = []

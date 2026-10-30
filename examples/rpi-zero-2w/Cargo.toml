@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 vl53l8cx-uld = { path = "../../vl53l8cx-uld" }
 vl53l5cx-uld = { path = "../../vl53l5cx-uld" }
+vl53l7cx-uld = { path = "../../vl53l7cx-uld" }
 vl53-8x8 = { path = "../../vl53-8x8" }
 linux-embedded-hal = "0.4"
 embedded-hal = "1.0"
@@ -24,6 +25,10 @@ log = "0.4"
 # BCM GPIO5. The ULD bin and test then use `vl53l5cx-uld` instead of
 # `vl53l8cx-uld`; the pure-Rust `vl53-8x8` driver autodetects the part.
 i2c-bus = []
+# With `i2c-bus`: drive the I2C board through `vl53l7cx-uld` (ST's VL53L7CX
+# ULD) instead of `vl53l5cx-uld`. The two C drivers are byte-identical on the
+# wire; this exists to exercise the L7 crate on a VL53L7CX (`VL53_LPN_GPIO=6`).
+l7-uld = ["i2c-bus"]
 
 # Only the two `tests/` suites are tests; keep cargo from shipping empty
 # lib/bin test harnesses to the Pi through the remote runner.

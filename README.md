@@ -24,10 +24,11 @@ ways to use that from Rust:
   and then asks the running firmware whether an L5-class module is an L5 or
   an L7. It works with `embedded-hal-async` buses, with blocking buses
   through small adapters, and under Embassy, RTIC 2 or no executor at all.
-- **`vl53l8cx-uld`** and **`vl53l5cx-uld`** are blocking, safe wrappers over
-  ST's own C code, one per sensor. They need libclang at build time (for
-  `bindgen`) and exist for people who want ST's reference implementation
-  behind an `embedded-hal` interface.
+- **`vl53l8cx-uld`**, **`vl53l5cx-uld`** and **`vl53l7cx-uld`** are blocking,
+  safe wrappers over ST's own C code, one per sensor, each tracking ST's
+  package for that part. They need libclang at build time (for `bindgen`)
+  and exist for people who want ST's reference implementation behind an
+  `embedded-hal` interface.
 
 Both share one set of types (`vl53-8x8-types`), so `Error`, `Resolution`,
 threshold and motion-indicator types are the same whichever driver you use.
@@ -36,9 +37,10 @@ threshold and motion-indicator types are the same whichever driver you use.
 
 | You want…                                              | Use                                   |
 | ------------------------------------------------------ | ------------------------------------- |
-| An async or blocking driver with no C, either sensor   | [`vl53-8x8`](./vl53-8x8)              |
+| An async or blocking driver with no C, any of the three | [`vl53-8x8`](./vl53-8x8)              |
 | ST's reference C driver behind a Rust API, VL53L8CX    | [`vl53l8cx-uld`](./vl53l8cx-uld)      |
 | ST's reference C driver behind a Rust API, VL53L5CX    | [`vl53l5cx-uld`](./vl53l5cx-uld)      |
+| ST's reference C driver behind a Rust API, VL53L7CX    | [`vl53l7cx-uld`](./vl53l7cx-uld)      |
 | Just the shared types, e.g. to pass results around     | [`vl53-8x8-types`](./vl53-8x8-types)  |
 
 ## Supported platforms
@@ -104,7 +106,7 @@ loop {
 On a blocking HAL, wrap the bus in `BlockingI2c` or `BlockingSpi` and drive
 each call with a trivial `block_on`; the RTIC example shows this.
 
-### Blocking, ST ULD (`vl53l8cx-uld`, `vl53l5cx-uld`)
+### Blocking, ST ULD (`vl53l8cx-uld`, `vl53l5cx-uld`, `vl53l7cx-uld`)
 
 ```rust,ignore
 use vl53l8cx_uld::{Resolution, Vl53l8cx};
@@ -202,11 +204,13 @@ reproduce.
 | Crate / directory          | Role                                                                    |
 | -------------------------- | ----------------------------------------------------------------------- |
 | [`vl53-8x8-types`](./vl53-8x8-types) | Shared enums, `Error`, plugin types. `no_std`, zero dependencies.       |
-| [`vl53-8x8`](./vl53-8x8)             | Pure-Rust async driver for VL53L5CX + VL53L8CX (`embedded-hal-async`, blocking adapters). |
+| [`vl53-8x8`](./vl53-8x8)             | Pure-Rust async driver for VL53L5CX, VL53L7CX + VL53L8CX (`embedded-hal-async`, blocking adapters). |
 | [`vl53l8cx-uld-sys`](./vl53l8cx-uld-sys) | bindgen + `cc` over ST's VL53L8CX ULD C sources and firmware.          |
 | [`vl53l8cx-uld`](./vl53l8cx-uld)     | Safe blocking `embedded-hal` wrapper over `vl53l8cx-uld-sys`.           |
 | [`vl53l5cx-uld-sys`](./vl53l5cx-uld-sys) | bindgen + `cc` over ST's VL53L5CX ULD C sources and firmware.          |
 | [`vl53l5cx-uld`](./vl53l5cx-uld)     | Safe blocking `embedded-hal` wrapper over `vl53l5cx-uld-sys`.           |
+| [`vl53l7cx-uld-sys`](./vl53l7cx-uld-sys) | bindgen + `cc` over ST's VL53L7CX ULD C sources and firmware.          |
+| [`vl53l7cx-uld`](./vl53l7cx-uld)     | Safe blocking `embedded-hal` wrapper over `vl53l7cx-uld-sys`.           |
 | [`differential-tests`](./differential-tests) | Not published. Host-side replay of recorded sensor traffic to both drivers; see above. |
 
 ### Examples
@@ -236,12 +240,12 @@ flowchart TD
         Tables["ST firmware image and data tables, generated from the ULD headers"]
     end
 
-    subgraph uld["vl53l8cx-uld and vl53l5cx-uld (blocking)"]
-        BlockingApi["Vl53l8cx or Vl53l5cx"]
+    subgraph uld["vl53l8cx-uld, vl53l5cx-uld and vl53l7cx-uld (blocking)"]
+        BlockingApi["Vl53l8cx, Vl53l5cx or Vl53l7cx"]
         PlatformShim["Platform shim: bind_platform_driver macro"]
     end
 
-    subgraph uldsys["vl53l8cx-uld-sys and vl53l5cx-uld-sys"]
+    subgraph uldsys["vl53l8cx-uld-sys, vl53l5cx-uld-sys and vl53l7cx-uld-sys"]
         Bindings["bindgen bindings and safe wrappers"]
         ULD["ST ULD C code and firmware (cc, needs libclang)"]
     end
@@ -299,8 +303,9 @@ options, udev rules and so on.
 This workspace is licensed under the **BSD 3-Clause License**; see
 [`LICENSE`](LICENSE).
 
-The C source under [`vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`](./vl53l8cx-uld-sys/src/VL53L8CX_ULD_API)
-and [`vl53l5cx-uld-sys/src/VL53L5CX_ULD_API/`](./vl53l5cx-uld-sys/src/VL53L5CX_ULD_API),
+The C source under [`vl53l8cx-uld-sys/src/VL53L8CX_ULD_API/`](./vl53l8cx-uld-sys/src/VL53L8CX_ULD_API),
+[`vl53l5cx-uld-sys/src/VL53L5CX_ULD_API/`](./vl53l5cx-uld-sys/src/VL53L5CX_ULD_API)
+and [`vl53l7cx-uld-sys/src/VL53L7CX_ULD_API/`](./vl53l7cx-uld-sys/src/VL53L7CX_ULD_API),
 and the firmware image and data tables shipped in `vl53-8x8`, are the
 official **STMicroelectronics Ultra Lite Drivers**, distributed by ST under
 the BSD 3-Clause License (see the `LICENSE-ST` files, the per-file copyright
