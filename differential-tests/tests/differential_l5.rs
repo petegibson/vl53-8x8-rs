@@ -235,7 +235,7 @@ fn replay(which: Which, test: &str) -> Replay {
 /// Run evo test `test` with driver `which` against a model built from `model_ops`.
 fn replay_with(which: Which, test: &str, model_ops: &[Op]) -> Replay {
     let rec = Recording::rust_l5();
-    let st: Shared = shared(RegisterModel::from_ops(model_ops).intercepting_module_type_probe());
+    let st: Shared = shared(RegisterModel::from_ops(&strip_module_type_probe(model_ops)).intercepting_module_type_probe());
     let (i2c, delay) = (MockI2c(st.clone()), MockDelay(st.clone()));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match which {
         Which::C => run_evo_sequence(test, &mut CDriver::new(i2c, delay)).map_err(|e| format!("{e:?}")),

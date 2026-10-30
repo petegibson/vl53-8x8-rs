@@ -221,15 +221,16 @@ byte for byte there.
 **Bus difference** (end of `init`, after the final `set_resolution` poll):
 `W 0x2ff4 len=12 [e0 c4 00 80 00 00 00 0f 00 02 00 08]`, one or more
 `R 0x2c00 len=4` status polls, `R 0x2c04 len=20` (12-byte DCI envelope plus
-the 8 flag bytes). Absent from ST's L5 transcript and from the evo recording,
-which predates 0.3.0.
+the 8 flag bytes). Absent from ST's L5 transcript; present in the evo
+recording, which was re-taken on 0.3.0 (the sensor answers
+`00 00 00 00 00 00 00 00`: module type 0, an L5).
 
 **Harness handling** (`compare::strip_module_type_probe`,
 `RegisterModel::intercepting_module_type_probe`): the L5 checks remove the
-probe from both transcripts before comparing, and the model serves the
-probe's reads synthetically (status "done", zero flags) instead of from the
-recording, so the extra status poll does not consume a recorded
-`UI_CMD_STATUS` answer belonging to the next DCI operation. Both are enabled
-only in `tests/differential_l5.rs`; the L8 checks compare the full
-transcripts as before. Re-recording the evo suite on 0.3.0 would make the
-probe part of the recording; the harness handles both cases the same way.
+probe from both transcripts before comparing, the register model is built
+from the probe-stripped recording, and the model serves the probe's reads
+synthetically (status "done", zero flags), so the probe neither consumes nor
+leaves behind a recorded `UI_CMD_STATUS` answer belonging to the next DCI
+operation. This makes the harness indifferent to whether a recording contains
+the probe. All of it is enabled only in `tests/differential_l5.rs`; the L8
+checks compare the full transcripts as before.

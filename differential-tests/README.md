@@ -70,12 +70,14 @@ driver's full transcript for one sequence, for investigations.
 One L5-only allowance, in both directions: since `vl53-8x8` 0.3.0 the Rust
 driver ends an L5-class `init` with a DCI read of the firmware flags at
 0xE0C4 to tell an L5 from an L7 (KNOWN_DIVERGENCES.md #6). ST's L5 code never
-issues it and the evo recording predates it, so the L5 checks remove that
-probe from both transcripts (`strip_module_type_probe`) and the model serves
-its reads synthetically rather than from the recording, which keeps the
-per-key cursors of the following DCI operations in phase. The L8 checks do
-neither: the L8 path does not probe, and the VL53L8CX ULD's own identical
-read of 0xE0C4 in `start_ranging` is compared like any other op.
+issues it, so the L5 checks remove that probe from both transcripts
+(`strip_module_type_probe`), build the register model from the stripped
+recording, and serve the probe's reads synthetically, which keeps the
+per-key cursors of the following DCI operations in phase whether or not the
+recording contains the probe (the current evo recording, taken on 0.3.0,
+does). The L8 checks do none of this: the L8 path does not probe, and the
+VL53L8CX ULD's own identical read of 0xE0C4 in `start_ranging` is compared
+like any other op.
 
 Current state: all 14 (c) checks pass; (d) passes for `async_i2c_alive` and
 is ignored for the 13 sequences with an `init` (#2); (d2) passes for 11 of 14
@@ -131,7 +133,7 @@ is named after the recording's variant. Current files:
 |---|---|---|---|---|---|
 | `nucleo-l8-spi-uld.json` | `examples/nucleo-f401re-uld/tests/sensor.rs` (C wrapper) | NUCLEO-F401RE + X-NUCLEO-53L8A1, SPI | 25 | 3156 | 290 kB |
 | `nucleo-l8-spi-8x8.json` | `examples/nucleo-f401re-embassy/tests/sensor_async.rs` (pure Rust) | NUCLEO-F401RE + X-NUCLEO-53L8A1, SPI | 28 | 3970 | 380 kB |
-| `evo-l5-i2c-8x8.json` | `examples/evo-f412re-embassy/tests/sensor_async.rs` (pure Rust) | evo-f412re with a VL53L5CX, I2C at 0x29 | 14 | 2004 | 182 kB |
+| `evo-l5-i2c-8x8.json` | `examples/evo-f412re-embassy/tests/sensor_async.rs` (pure Rust, `vl53-8x8` 0.3.0) | evo-f412re with a VL53L5CX, I2C at 0x29 | 14 | 2042 | 184 kB |
 
 The Nucleo recordings were taken with features
 `spi-bus,defmt-bus-trace,thresholds,xtalk,motion`, the evo one with
