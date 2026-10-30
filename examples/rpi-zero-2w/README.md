@@ -297,3 +297,11 @@ perpendicular distance, and the L8 returned about 4x the signal per SPAD.
 Use `just report-pi-scene [i2c-bus]` to print distance, status, ambient and
 signal grids when judging a scene. Also peel the protective film off a new
 module.
+
+With the L5 on GPIO5 and the L7 on GPIO6 together on I2C1 (2026-10-30), both
+suites pass on each board (18/18 + 18/18 twice, `VL53_LPN_GPIO=6` for the
+L7), `two_sensors_one_bus` ran for real, and `two_i2c` streamed both at
+10 Hz with the L7 at 0x2A. The three modules' factory NVM blocks are
+compared in [`nvm/`](./nvm/README.md). One caution from that session: plugging
+a board into the live Pi can brown out the SD card (ssh still answered but
+no command would run until a power cycle); power down before rewiring.

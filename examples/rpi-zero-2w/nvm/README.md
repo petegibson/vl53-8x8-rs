@@ -9,7 +9,8 @@ read off the dumps and off what `send_offset_data` does with the block.
 
 | File | Module | Board |
 | ---- | ------ | ----- |
-| `vl53l7cx-pololu-2026-10-30.txt` | VL53L7CX (detected as L5) | Pololu carrier, Pi I2C1 |
+| `vl53l5cx-pololu-2026-10-30.txt` | VL53L5CX | Pololu carrier, Pi I2C1, LPn GPIO5 |
+| `vl53l7cx-pololu-2026-10-30.txt` | VL53L7CX (detected as L5) | Pololu carrier, Pi I2C1, LPn GPIO6 |
 | `vl53l8cx-pololu-2026-10-30.txt` | VL53L8CX | Pololu carrier, Pi SPI0 |
 
 ## Layout (raw bytes, before ST's word swap)
@@ -30,7 +31,7 @@ header `ii ii ss ss` (index, then size/type), big-endian:
 | 0x1d4 | `9f c8 01 00` + zeros | sub-block 0x9FC8 |
 | 0x1e8 | `00 00 00 0f` | tail, not re-sent by ST |
 
-Everything outside the two grids is byte-identical between the L7 and the
+Everything outside the two grids is byte-identical across the L5, L7 and
 L8. There is no serial number, module id, lens id or product code in the
 block: the headers are fixed and the payload is calibration only. The ULD
 exposes no other NVM read, so a per-device identity, if the silicon has one,
@@ -38,16 +39,21 @@ is not reachable through it.
 
 ## What differs between modules
 
-| | VL53L7CX | VL53L8CX |
-| --- | --- | --- |
-| range offsets (16 zones) | −111 … −178, one outlier −281 | −89 … −134, one outlier −258 |
-| signal grid (16 zones) | 674 k … 884 k | 3.97 M … 5.25 M |
+| | VL53L5CX | VL53L7CX | VL53L8CX |
+| --- | --- | --- | --- |
+| range offsets, zones 0–14 | −112 … −168 | −111 … −178 | −89 … −134 |
+| 16th entry | −286 | −281 | −258 |
+| signal grid (16 zones) | 1.29 M … 1.80 M | 674 k … 884 k | 3.97 M … 5.25 M |
 
-Both are per-device calibration values and will differ between two modules
-of the same part as well, so neither grid can identify a part type without
-sampling many modules. The L8's calibration signal is about 6x the L7's,
-consistent with the L8's longer rated range and with the ~4x higher
-signal per SPAD it returned on the Pi under the same box.
+The range offsets are per-device and overlap between parts. The 16th `i16`
+is far from the other fifteen on all three modules, so it is probably not a
+zone offset but another field sharing the block.
 
-Add a VL53L5CX dump when one is on the Pi (`just report-pi-nvm i2c-bus`) and
-extend the table.
+The signal grid does separate the three modules, and in the ratios the
+optics predict: the L7's calibration signal is about half the L5's (its 60°
+lens spreads the emitter over roughly twice the area of the 45° lens), and
+the L8's about 3x the L5's (brighter emitter, longer rated range). With one
+module of each that is suggestive, not a detector: it is a factory
+measurement that also varies module to module, and the L5/L7 split would
+have to be confirmed on a batch of each before a threshold could be trusted.
+The drivers do not use it.
