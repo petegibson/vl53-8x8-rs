@@ -1,7 +1,7 @@
 # vl53-8x8
 
-A pure-Rust, `no_std`, async driver for the STMicroelectronics **VL53L5CX**
-and **VL53L8CX** 8x8 multizone Time-of-Flight sensors, over
+A pure-Rust, `no_std`, async driver for the STMicroelectronics **VL53L5CX**,
+**VL53L7CX** and **VL53L8CX** 8x8 multizone Time-of-Flight sensors, over
 `embedded-hal-async` I2C or SPI.
 
 There is no C code, no FFI and no build script. The ST Ultra Lite Driver
@@ -24,12 +24,20 @@ Downstream users never pull it in and never need libclang.
 
 ## Variant detection and firmware
 
-The VL53L5CX and VL53L8CX run the same ULD firmware image apart from a handful
-of bytes. `Sensor::init` reads the device and revision IDs (`detect`,
-`Variant`), then uploads the shipped VL53L8CX image with the per-variant patch
-applied on the fly (`PatchedFirmware`); a few per-variant quirks (laser-safety
-check, negative-distance clamping) are selected the same way. The detected
-part is available from `Sensor::variant()` after `init`.
+The VL53L5CX, VL53L7CX and VL53L8CX run the same ULD firmware image apart from
+a handful of bytes. `Sensor::init` reads the device and revision IDs
+(`detect`, `Variant`): revision 0x0C is an L8, revisions 0x01 and 0x02 are
+the L5-class die. It then uploads the shipped VL53L8CX image with the
+per-variant patch applied on the fly (`PatchedFirmware`); a few per-variant
+quirks (laser-safety check, negative-distance clamping) are selected the same
+way. The VL53L7CX is that same L5 die behind a 60° lens and is
+indistinguishable from an L5 on the bus (ST's own L7CX ULD is byte-identical
+to the L5CX one in firmware and tables), so on the L5-class die `init` ends
+by asking the running firmware for its module type (one 8-byte DCI read at
+0xE0C4, as ST's VL53LMZ driver does) and reports `Variant::L7` when it
+answers 1. The L7 is driven exactly like an L5; the distinction only matters
+to code that maps zones to angles. `Sensor::variant()` gives the result after
+`init`, `Sensor::module_type()` the raw byte.
 
 ## Usage
 

@@ -118,7 +118,7 @@ mod tests {
         sensor.init().await.unwrap();
         let v = sensor.variant();
         defmt::info!("detected variant: {}", defmt::Debug2Format(&v));
-        defmt::assert!(matches!(v, Variant::L5 | Variant::L8));
+        defmt::assert!(matches!(v, Variant::L5 | Variant::L7 | Variant::L8));
     }
 
     #[test]

@@ -4,16 +4,39 @@ All notable changes to the published crates (`vl53-8x8`, `vl53l8cx-uld`,
 `vl53l5cx-uld`, `vl53-8x8-types`, `vl53l8cx-uld-sys`, `vl53l5cx-uld-sys`).
 The three drivers share one API shape and are versioned together.
 
-## Unreleased
+## 0.3.0 — unreleased
+
+`vl53-8x8` 0.3.0. `vl53-8x8-types`, `vl53l8cx-uld`, `vl53l5cx-uld` and the
+sys crates are unchanged.
+
+### VL53L7CX support (breaking: `Variant` gains a member)
+
+- `Variant::L7`. The VL53L7CX is the L5 die behind a 60° lens: ST's L7CX ULD
+  (STSW-IMG036 2.0.1) is byte-identical to the L5CX ULD in firmware,
+  configuration and xtalk tables and checks the same revision id, so the two
+  cannot be told apart before the firmware runs. `init` (and `redetect`) now
+  end an L5-class bring-up with one 8-byte DCI read of the firmware flags at
+  0xE0C4, whose byte 1 is the module type (0 = L5, 1 = L7, 2 = L8; ST's
+  VL53LMZ ULD calls it `MODULE_TYPE_IDX`), and report `Variant::L7` for a
+  module that answers 1. The L7 is driven exactly like an L5 (`info()`
+  returns the L5 table). The L8 path is untouched and stays byte-identical to
+  ST's VL53L8CX ULD; the L5 path differs from the VL53L5CX ULD by that one
+  read (differential-tests KNOWN_DIVERGENCES.md #6). Verified on a Pololu
+  VL53L5CX, VL53L7CX and VL53L8CX.
+- `Sensor::module_type()` returns the raw byte; `MODULE_TYPE_L5/L7/L8`,
+  `FW_FLAGS_INDEX` and `Variant::from_module_type` are public.
+- `detect` accepts revision 0x01 (VL53L5CX cut 1.1) as an L5, as ST's VL53LMZ
+  ULD does; it was an `UnknownRevision` error.
+- Migration: exhaustive `match`es on `Variant` need an `L7` arm; code that
+  treated an L7 module as `L5` should accept both (`info()` is the same).
+
+### Added
 
 - `vl53-8x8`: `Sensor::read_nvm_data` and `NVM_DATA_SIZE` expose the 492-byte
   factory NVM block (per-zone offset calibration) that `init` fetches, for
-  diagnostics and module comparison. `init`'s bus traffic is unchanged.
+  diagnostics and module comparison. `init`'s bus traffic is unchanged by it.
 - `vl53-8x8`: `Sensor::dci_read` gives raw access to the firmware's DCI data
   blocks (the ULD's `dci_read_data`) for registers the API does not wrap.
-- `vl53-8x8`: `Variant::L5` documents that a VL53L7CX is detected and driven
-  as an L5 (ST's L7 ULD is byte-identical in firmware, configuration and
-  xtalk and checks the same revision id); verified on hardware.
 
 ## 0.2.0 — 2026-10-19
 

@@ -25,6 +25,9 @@ pub struct State {
     /// Offset calibration read from the sensor NVM at init
     /// (`VL53L8CX_OFFSET_BUFFER_SIZE` bytes).
     pub(crate) offset_data: [u8; VL53L8CX_OFFSET_BUFFER_SIZE as usize],
+    /// Module type the firmware reported at DCI 0xE0C5 after the last `init`
+    /// (`None` before init, or when the L8 path skipped the probe).
+    pub(crate) module_type: Option<u8>,
     /// Crosstalk shape currently applied: the ULD default or a user
     /// calibration (`VL53L8CX_XTALK_BUFFER_SIZE` bytes).
     pub(crate) xtalk_data: [u8; XTALK_BUFFER_SIZE],
@@ -41,6 +44,7 @@ impl State {
             data_read_size: 0,
             is_auto_stop_enabled: false,
             offset_data: [0; VL53L8CX_OFFSET_BUFFER_SIZE as usize],
+            module_type: None,
             xtalk_data: [0; XTALK_BUFFER_SIZE],
             temp_buffer: [0; VL53L8CX_TEMPORARY_BUFFER_SIZE],
         }

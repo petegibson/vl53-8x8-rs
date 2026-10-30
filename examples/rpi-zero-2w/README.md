@@ -277,10 +277,13 @@ L5 charge-pump round trip).
 
 A Pololu VL53L7CX carrier is pin-compatible with the VL53L5CX one and runs
 with the same `i2c-bus` build: ST's L7 ULD is the L5 ULD renamed (identical
-firmware, configuration and xtalk tables, same revision id), so both drivers
-detect and drive it as an L5 and `init_detects_expected_variant` expects
-`L5`. Distances are plane-perpendicular on both parts (the lens geometry is
-handled inside the sensor): a flat ceiling reads flat across the grid.
+firmware, configuration and xtalk tables, same revision id), so the C wrapper
+drives it as an L5 and `vl53-8x8` drives it with the L5 tables. Since
+`vl53-8x8` 0.3.0 the pure-Rust driver reports it as `Variant::L7` (it asks
+the running firmware for the module type, see [`nvm/`](./nvm/README.md)), so
+`init_detects_expected_variant` accepts `L5` or `L7` on this bus. Distances
+are plane-perpendicular on both parts (the lens geometry is handled inside
+the sensor): a flat ceiling reads flat across the grid.
 
 What does change is signal: the 60° lens spreads the same emitter power
 over about twice the area of the L5's 45°, so per-zone signal halves and the

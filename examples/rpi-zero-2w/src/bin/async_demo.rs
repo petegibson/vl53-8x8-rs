@@ -35,10 +35,11 @@ async fn main() -> anyhow::Result<()> {
     let started = Instant::now();
     sensor.init().await.context("sensor init / firmware upload")?;
     log::info!(
-        "Sensor ready ({:.1} s), detected variant: {:?} (expected {:?}).",
+        "Sensor ready ({:.1} s), detected variant: {:?} (module type {:?}; expected one of {:?}).",
         started.elapsed().as_secs_f32(),
         sensor.variant(),
-        native::EXPECTED_VARIANT
+        sensor.module_type(),
+        native::EXPECTED_VARIANTS
     );
 
     let grid = match RESOLUTION {

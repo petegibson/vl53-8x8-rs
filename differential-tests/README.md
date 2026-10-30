@@ -67,6 +67,16 @@ of the C L8 recording and assert that the L5 and L8 bytes differ at exactly the
 offsets of the three patch tables. `dump_transcript` (ignored) prints one
 driver's full transcript for one sequence, for investigations.
 
+One L5-only allowance, in both directions: since `vl53-8x8` 0.3.0 the Rust
+driver ends an L5-class `init` with a DCI read of the firmware flags at
+0xE0C4 to tell an L5 from an L7 (KNOWN_DIVERGENCES.md #6). ST's L5 code never
+issues it and the evo recording predates it, so the L5 checks remove that
+probe from both transcripts (`strip_module_type_probe`) and the model serves
+its reads synthetically rather than from the recording, which keeps the
+per-key cursors of the following DCI operations in phase. The L8 checks do
+neither: the L8 path does not probe, and the VL53L8CX ULD's own identical
+read of 0xE0C4 in `start_ranging` is compared like any other op.
+
 Current state: all 14 (c) checks pass; (d) passes for `async_i2c_alive` and
 is ignored for the 13 sequences with an `init` (#2); (d2) passes for 11 of 14
 and is ignored for `power_mode_sleep_wakeup` (#3),

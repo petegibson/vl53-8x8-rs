@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use rpi_zero_2w::native::{
     self, Driver, PowerMode, RangingMode, Resolution, ResultsData, TargetOrder, Variant,
-    EXPECTED_VARIANT, NB_TARGET_PER_ZONE,
+    EXPECTED_VARIANTS, NB_TARGET_PER_ZONE,
 };
 use rpi_zero_2w::lpn_gpio;
 
@@ -160,7 +160,11 @@ async fn init_detects_expected_variant() {
         started.elapsed().as_secs_f32(),
         sensor.variant()
     );
-    assert_eq!(sensor.variant(), EXPECTED_VARIANT);
+    assert!(
+        EXPECTED_VARIANTS.contains(&sensor.variant()),
+        "detected {:?}, expected one of {EXPECTED_VARIANTS:?}",
+        sensor.variant()
+    );
     assert!(sensor.is_alive().await.unwrap());
 }
 
@@ -319,7 +323,7 @@ async fn power_mode() {
     sensor.set_power_mode(PowerMode::Wakeup).await.unwrap();
     assert_eq!(sensor.get_power_mode().await.unwrap(), PowerMode::Wakeup);
 
-    if sensor.variant() == Variant::L5 {
+    if sensor.variant() != Variant::L8 {
         assert!(
             sensor.set_power_mode(PowerMode::DeepSleep).await.is_err(),
             "DeepSleep must be rejected on the VL53L5CX"

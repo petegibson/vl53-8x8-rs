@@ -23,6 +23,42 @@ pub fn normalise(ops: &[Op]) -> Vec<Op> {
     out
 }
 
+/// The DCI read command the pure-Rust driver issues at the end of `init` on
+/// the L5-class die to learn the module type (8 bytes at 0xE0C4; ST's VL53LMZ
+/// ULD does the same, the VL53L5CX ULD does not): written to
+/// `VL53L8CX_UI_CMD_END - 11`.
+pub const MODULE_TYPE_PROBE_CMD: [u8; 12] = [0xE0, 0xC4, 0x00, 0x80, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x02, 0x00, 0x08];
+/// Register the probe command is written to (`VL53L8CX_UI_CMD_END - 11`).
+pub const MODULE_TYPE_PROBE_CMD_REG: u16 = 0x2FFF - 11;
+/// Register the probe's answer is read from (`VL53L8CX_UI_CMD_START`) ...
+pub const MODULE_TYPE_PROBE_ANSWER_REG: u16 = 0x2C04;
+/// ... and its length (8 data bytes plus the 12-byte DCI envelope).
+pub const MODULE_TYPE_PROBE_ANSWER_LEN: usize = 8 + 12;
+
+/// Remove the module-type probe (KNOWN_DIVERGENCES.md #6) from a transcript:
+/// the command write, the status polls after it and the 20-byte answer read.
+/// Applied to both sides of every L5 comparison, so the probe is neither
+/// compared nor hidden elsewhere: the recording may or may not contain it,
+/// the pure-Rust driver always issues it, ST's L5 code never does.
+pub fn strip_module_type_probe(ops: &[Op]) -> Vec<Op> {
+    let mut out: Vec<Op> = Vec::with_capacity(ops.len());
+    let mut in_probe = false;
+    for op in ops {
+        if in_probe {
+            if op.dir == Dir::R && op.reg == MODULE_TYPE_PROBE_ANSWER_REG && op.data.len() == MODULE_TYPE_PROBE_ANSWER_LEN {
+                in_probe = false;
+            }
+            continue;
+        }
+        if op.dir == Dir::W && op.reg == MODULE_TYPE_PROBE_CMD_REG && op.data[..] == MODULE_TYPE_PROBE_CMD[..] {
+            in_probe = true;
+            continue;
+        }
+        out.push(op.clone());
+    }
+    out
+}
+
 /// Merge runs of writes that continue each other in the register space (the
 /// next write starts at `reg + len` of the previous one, no page-select write
 /// in between) into one write. **Diagnostic only**: the checks compare with

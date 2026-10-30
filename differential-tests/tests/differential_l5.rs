@@ -40,7 +40,8 @@
 use differential_tests::mock::shared;
 use differential_tests::transcript::{blobs, FIRMWARE};
 use differential_tests::{
-    coalesce_contiguous_writes, compare, normalise, run_evo_sequence, Dir, Driver, MockDelay, MockI2c, MockPin, Op,
+    coalesce_contiguous_writes, compare, normalise, run_evo_sequence, strip_module_type_probe, Dir, Driver, MockDelay,
+    MockI2c, MockPin, Op, MODULE_TYPE_PROBE_ANSWER_LEN, MODULE_TYPE_PROBE_ANSWER_REG,
     Recording, RegisterModel, RustDriver, Shared, Transcript, EVO_SEQUENCES,
 };
 use vl53_8x8::sensor::{L5_CALIBRATE_XTALK_PATCH, L5_CONFIG_PATCH, L5_FW_PATCH};
@@ -234,7 +235,7 @@ fn replay(which: Which, test: &str) -> Replay {
 /// Run evo test `test` with driver `which` against a model built from `model_ops`.
 fn replay_with(which: Which, test: &str, model_ops: &[Op]) -> Replay {
     let rec = Recording::rust_l5();
-    let st: Shared = shared(RegisterModel::from_ops(model_ops));
+    let st: Shared = shared(RegisterModel::from_ops(model_ops).intercepting_module_type_probe());
     let (i2c, delay) = (MockI2c(st.clone()), MockDelay(st.clone()));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match which {
         Which::C => run_evo_sequence(test, &mut CDriver::new(i2c, delay)).map_err(|e| format!("{e:?}")),
@@ -286,7 +287,18 @@ fn check(which: Which, test: &str, mode: Mode) {
 
 fn check_against(which: Which, test: &str, mode: Mode, expected_label: &str, expected: &[Op], replayed: Replay) {
     let Replay { transcript: actual, failure, unknown } = replayed;
-    let (mut exp_n, mut act_n) = (normalise(expected), normalise(&actual));
+    // The pure-Rust driver ends an L5-class `init` with the module-type probe
+    // (KNOWN_DIVERGENCES.md #6): one DCI read ST's L5 code never issues and
+    // the current recording predates. Removed from both sides before every
+    // comparison, and its answer key dropped from the unknown-read list.
+    let (mut exp_n, mut act_n) = (
+        normalise(&strip_module_type_probe(expected)),
+        normalise(&strip_module_type_probe(&actual)),
+    );
+    let unknown: Vec<(u16, usize)> = unknown
+        .into_iter()
+        .filter(|&(reg, len)| !(reg == MODULE_TYPE_PROBE_ANSWER_REG && len == MODULE_TYPE_PROBE_ANSWER_LEN))
+        .collect();
     println!(
         "{test}: expected {} ops ({} normalised) vs {which:?} driver {} ops ({} normalised)",
         expected.len(),

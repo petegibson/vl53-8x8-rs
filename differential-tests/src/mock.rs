@@ -32,6 +32,7 @@ pub fn shared(model: RegisterModel) -> Shared {
 
 impl SharedState {
     fn write(&mut self, reg: u16, data: &[u8]) {
+        self.model.note_write(reg, data);
         self.transcript.push(Op::write(reg, data));
     }
     fn read(&mut self, reg: u16, buf: &mut [u8]) {

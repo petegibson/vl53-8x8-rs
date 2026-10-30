@@ -466,11 +466,12 @@ pub mod native {
     /// The async driver over this build's bus, with LPn attached.
     pub type Driver = vl53_8x8::Sensor<Bus, crate::TokioDelay, crate::LpnPin>;
 
-    /// The part this build's wiring carries.
+    /// The parts this build's wiring may carry: the SPI board is an L8; an
+    /// I2C board is an L5 or an L7 (the driver tells them apart after init).
     #[cfg(not(feature = "i2c-bus"))]
-    pub const EXPECTED_VARIANT: Variant = Variant::L8;
+    pub const EXPECTED_VARIANTS: &[Variant] = &[Variant::L8];
     #[cfg(feature = "i2c-bus")]
-    pub const EXPECTED_VARIANT: Variant = Variant::L5;
+    pub const EXPECTED_VARIANTS: &[Variant] = &[Variant::L5, Variant::L7];
 
     /// Open the bus and LPn, raise LPn (comms enable) and return the driver,
     /// not yet initialised. Call from inside a Tokio runtime (the delay

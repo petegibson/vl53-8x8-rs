@@ -203,3 +203,33 @@ an artefact; the structure above is not.
 overwrites `xtalk_data` with the sensor's current table and re-sends the
 default configuration; both drivers return `InvalidParam`. The Rust driver
 leaves the sensor untouched, which its on-target test asserts.
+
+## 6. L5-class `init`: the Rust driver reads the module type afterwards — BY DESIGN (vl53-8x8 0.3.0)
+
+**Status: intentional, handled by the harness rather than ignored.** Since
+0.3.0 `vl53-8x8` ends every L5-class `init` (and `redetect`) with one DCI
+read of 8 bytes at 0xE0C4, the firmware flags block, whose byte 1 is the
+module type (0 = VL53L5CX, 1 = VL53L7CX, 2 = VL53L8CX). It is the only way to
+tell an L5 from an L7: both report device id 0xF0 and revision id 0x02 and run
+the same firmware. ST's VL53L5CX ULD never issues this read; ST's VL53LMZ ULD
+(the VL53L7CH/VL53L8CH driver) ends `vl53lmz_init` with exactly this read
+(`module_type = fw_flags[1]`), which is where the scheme comes from. The L8
+path is unchanged: the VL53L8CX ULD already reads this block in
+`start_ranging` for its laser-safety flag, and `vl53-8x8` still matches it
+byte for byte there.
+
+**Bus difference** (end of `init`, after the final `set_resolution` poll):
+`W 0x2ff4 len=12 [e0 c4 00 80 00 00 00 0f 00 02 00 08]`, one or more
+`R 0x2c00 len=4` status polls, `R 0x2c04 len=20` (12-byte DCI envelope plus
+the 8 flag bytes). Absent from ST's L5 transcript and from the evo recording,
+which predates 0.3.0.
+
+**Harness handling** (`compare::strip_module_type_probe`,
+`RegisterModel::intercepting_module_type_probe`): the L5 checks remove the
+probe from both transcripts before comparing, and the model serves the
+probe's reads synthetically (status "done", zero flags) instead of from the
+recording, so the extra status poll does not consume a recorded
+`UI_CMD_STATUS` answer belonging to the next DCI operation. Both are enabled
+only in `tests/differential_l5.rs`; the L8 checks compare the full
+transcripts as before. Re-recording the evo suite on 0.3.0 would make the
+probe part of the recording; the harness handles both cases the same way.

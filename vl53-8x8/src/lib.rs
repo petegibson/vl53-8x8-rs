@@ -103,7 +103,7 @@ pub use types::MotionConfiguration;
 
 pub use bus::{BlockingI2c, BlockingSpi, Spi};
 pub use firmware::{FirmwareSource, PatchedFirmware, SliceFirmware};
-pub use sensor::{detect, Variant};
+pub use sensor::{detect, Variant, FW_FLAGS_INDEX, MODULE_TYPE_L5, MODULE_TYPE_L7, MODULE_TYPE_L8};
 
 /// Driver handle. `LPN`, `INT` and `PWR` are the optional LPn (I2C comms
 /// enable), INT (data ready) and power-enable pins, [`NoPin`] when absent;
@@ -520,6 +520,7 @@ where
     /// thresholds disabled.
     pub async fn init(&mut self) -> Result<(), Error<BUS::Error>> {
         self.variant = sensor::detect(&mut self.bus, self.address).await?;
+        self.stdev.module_type = None;
 
         let mut fw = self.variant.firmware();
         let info = self.variant.info();
@@ -531,26 +532,70 @@ where
             &mut fw,
             info,
         )
-        .await
+        .await?;
+        self.refine_variant_from_firmware().await
     }
 
-    /// The sensor variant detected by [`Sensor::init`]. Before `init` this is
-    /// the default ([`Variant::L8`]), not a detected value.
+    /// Ask the running firmware which module it is on, for the L5-class die
+    /// only: an L5 and an L7 share device id, revision id and firmware, so
+    /// this one 8-byte DCI read (the same one ST's VL53LMZ ULD ends its init
+    /// with) is the only way to tell them apart. The L8 path is left exactly
+    /// as ST's VL53L8CX ULD has it. An unexpected value keeps the
+    /// revision-based variant and is exposed by [`Sensor::module_type`].
+    async fn refine_variant_from_firmware(&mut self) -> Result<(), Error<BUS::Error>> {
+        if self.variant == Variant::L8 {
+            return Ok(());
+        }
+        const FLAGS_LEN: usize = 8;
+        let mut flags = [0u8; FLAGS_LEN];
+        ops::dci_read(
+            &mut self.bus,
+            self.address,
+            &mut self.delay,
+            &mut self.stdev.temp_buffer,
+            &mut flags,
+            sensor::FW_FLAGS_INDEX as u32,
+            FLAGS_LEN as u16,
+        )
+        .await?;
+        let module_type = flags[1];
+        self.stdev.module_type = Some(module_type);
+        if module_type == sensor::MODULE_TYPE_L7 {
+            self.variant = Variant::L7;
+        }
+        Ok(())
+    }
+
+    /// The sensor variant detected by [`Sensor::init`] (or [`Sensor::redetect`]).
+    /// Before `init` this is the default ([`Variant::L8`]), not a detected value.
     pub fn variant(&self) -> Variant {
         self.variant
+    }
+
+    /// The module type the firmware reported at DCI 0xE0C5 during the last
+    /// [`Sensor::init`] / [`Sensor::redetect`]: [`MODULE_TYPE_L5`],
+    /// [`MODULE_TYPE_L7`] or [`MODULE_TYPE_L8`], or another value for a module
+    /// this crate does not know. `None` before `init`, and on the L8 path,
+    /// which does not probe (its revision id is unambiguous).
+    pub fn module_type(&self) -> Option<u8> {
+        self.stdev.module_type
     }
 
     /// Re-detect the sensor variant at the current address, without the
     /// firmware upload done by [`Sensor::init`]. For handles created with
     /// [`Sensor::with_address`] against an already-initialised sensor:
     /// [`Sensor::start_ranging`] recomputes all per-session state, so after
-    /// this the handle can resume ranging where the old one left off.
+    /// this the handle can resume ranging where the old one left off. The
+    /// firmware must be running (as it is after another handle's `init`): on
+    /// the L5-class die this also asks it for the module type, as `init` does.
     pub async fn redetect(&mut self) -> Result<Variant, Error<BUS::Error>> {
         self.variant = sensor::detect(&mut self.bus, self.address).await?;
+        self.stdev.module_type = None;
+        self.refine_variant_from_firmware().await?;
         Ok(self.variant)
     }
 
-    /// Returns true if a recognised sensor (VL53L5CX or VL53L8CX) is present.
+    /// Returns true if a recognised sensor (VL53L5CX, VL53L7CX or VL53L8CX) is present.
     pub async fn is_alive(&mut self) -> Result<bool, Error<BUS::Error>> {
         match sensor::detect(&mut self.bus, self.address).await {
             Ok(_) => Ok(true),

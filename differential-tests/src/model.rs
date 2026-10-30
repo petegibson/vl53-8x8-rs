@@ -29,10 +29,27 @@
 //!
 //! Reads of a key that never appears in the sequence return zeros and are
 //! remembered in `unknown`; they show up in the transcript diff anyway.
+//!
+//! One exception to "writes are not interpreted": the pure-Rust driver's
+//! module-type probe at the end of an L5-class `init` (KNOWN_DIVERGENCES.md
+//! #6). Its status polls would consume recorded `UI_CMD_STATUS` answers that
+//! belong to the next DCI operation and shift every later poll out of phase,
+//! so the model watches for the probe's command write and, until the probe's
+//! answer read, serves a synthetic "command done" status and a zero answer
+//! (module type 0, an L5) without touching the cursors. A recording that
+//! contains the probe would be served the same way, which keeps the model
+//! independent of whether the recording predates the probe.
 
 use std::collections::HashMap;
 
+use crate::compare::{
+    MODULE_TYPE_PROBE_ANSWER_LEN, MODULE_TYPE_PROBE_ANSWER_REG, MODULE_TYPE_PROBE_CMD, MODULE_TYPE_PROBE_CMD_REG,
+};
 use crate::{Dir, Op};
+
+/// `UI_CMD_STATUS`, polled 4 bytes at a time; byte 1 == 0x03 means done.
+const UI_CMD_STATUS_REG: u16 = 0x2C00;
+const UI_CMD_STATUS_DONE: [u8; 4] = [0x05, 0x03, 0x00, 0x00];
 
 #[derive(Debug, Clone, Default)]
 pub struct RegisterModel {
@@ -42,6 +59,13 @@ pub struct RegisterModel {
     pub unknown: Vec<(u16, usize)>,
     /// Number of reads served past the end of a key's recorded responses.
     pub sticky_reads: usize,
+    /// Whether to watch for the module-type probe at all. Only the L5 harness
+    /// turns this on: the VL53L8CX ULD's `start_ranging` issues the identical
+    /// DCI read of 0xE0C4 for its laser-safety check, which must be served
+    /// from the recording like any other read.
+    intercept_probe: bool,
+    /// Set by the module-type probe's command write, cleared by its answer read.
+    probe_pending: bool,
 }
 
 impl RegisterModel {
@@ -58,11 +82,38 @@ impl RegisterModel {
         self.cursor.clear();
         self.unknown.clear();
         self.sticky_reads = 0;
+        self.probe_pending = false;
+    }
+
+    /// Serve the pure-Rust driver's module-type probe synthetically instead of
+    /// from the recording (see the module docs). For the L5 harness only.
+    pub fn intercepting_module_type_probe(mut self) -> Self {
+        self.intercept_probe = true;
+        self
+    }
+
+    /// Writes are not interpreted, except to notice the module-type probe's
+    /// command when [`Self::intercepting_module_type_probe`] is on.
+    pub fn note_write(&mut self, reg: u16, data: &[u8]) {
+        if self.intercept_probe && reg == MODULE_TYPE_PROBE_CMD_REG && data == MODULE_TYPE_PROBE_CMD {
+            self.probe_pending = true;
+        }
     }
 
     /// Fill `buf` with the next recorded response for `(reg, buf.len())`.
     pub fn read(&mut self, reg: u16, buf: &mut [u8]) {
         let key = (reg, buf.len());
+        if self.probe_pending {
+            if key == (UI_CMD_STATUS_REG, UI_CMD_STATUS_DONE.len()) {
+                buf.copy_from_slice(&UI_CMD_STATUS_DONE);
+                return;
+            }
+            if key == (MODULE_TYPE_PROBE_ANSWER_REG, MODULE_TYPE_PROBE_ANSWER_LEN) {
+                buf.fill(0);
+                self.probe_pending = false;
+                return;
+            }
+        }
         match self.responses.get(&key) {
             None => {
                 buf.fill(0);

@@ -10,7 +10,7 @@ read off the dumps and off what `send_offset_data` does with the block.
 | File | Module | Board |
 | ---- | ------ | ----- |
 | `vl53l5cx-pololu-2026-10-30.txt` | VL53L5CX | Pololu carrier, Pi I2C1, LPn GPIO5 |
-| `vl53l7cx-pololu-2026-10-30.txt` | VL53L7CX (detected as L5) | Pololu carrier, Pi I2C1, LPn GPIO6 |
+| `vl53l7cx-pololu-2026-10-30.txt` | VL53L7CX (reported as L5 by vl53-8x8 0.2, as L7 since 0.3.0) | Pololu carrier, Pi I2C1, LPn GPIO6 |
 | `vl53l8cx-pololu-2026-10-30.txt` | VL53L8CX | Pololu carrier, Pi SPI0 |
 
 ## Layout (raw bytes, before ST's word swap)

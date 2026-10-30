@@ -28,7 +28,10 @@ pub mod mock;
 pub mod model;
 pub mod transcript;
 
-pub use compare::{coalesce_contiguous_writes, compare, normalise};
+pub use compare::{
+    coalesce_contiguous_writes, compare, normalise, strip_module_type_probe, MODULE_TYPE_PROBE_ANSWER_LEN,
+    MODULE_TYPE_PROBE_ANSWER_REG, MODULE_TYPE_PROBE_CMD, MODULE_TYPE_PROBE_CMD_REG,
+};
 pub use driver::{run_evo_sequence, run_sequence, Driver, RustDriver, EVO_SEQUENCES, SEQUENCES};
 pub use mock::{block_on, MockDelay, MockI2c, MockPin, MockSpi, Shared};
 pub use model::RegisterModel;

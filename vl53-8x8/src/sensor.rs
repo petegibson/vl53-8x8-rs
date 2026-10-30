@@ -95,20 +95,60 @@ pub const NB_TARGET_CONFIG_PATCH: &[(usize, u8)] = if NB_TARGET_PER_ZONE == 1 {
 pub const FW_NBTAR_RANGING_INDEX: usize = 107;
 
 /// A supported sensor variant.
+///
+/// Detection is in two steps. [`detect`] reads the device and revision id
+/// before any firmware is loaded: revision 0x0C is an L8, revisions 0x01 and
+/// 0x02 are the L5-class die shared by the VL53L5CX and the VL53L7CX. Those
+/// two cannot be told apart on the bus (ST's VL53L7CX ULD carries
+/// byte-identical firmware, configuration and xtalk tables to the L5CX's and
+/// checks the same revision id), so [`crate::Sensor::init`] asks the running
+/// firmware: byte 1 of the DCI block at 0xE0C4 reports the module type
+/// ([`MODULE_TYPE_L5`], [`MODULE_TYPE_L7`], [`MODULE_TYPE_L8`]; ST's VL53LMZ
+/// ULD calls it `MODULE_TYPE_IDX`, 0xE0C5), and an L5-class sensor that
+/// answers [`MODULE_TYPE_L7`] is reported as [`Variant::L7`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Variant {
-    /// VL53L5CX, and the VL53L7CX. The L7 is an L5 die behind a wider lens
-    /// (60° instead of 45° square field of view): ST's VL53L7CX ULD carries
-    /// byte-identical firmware, configuration and xtalk tables and checks
-    /// for the same revision id (0x02), so the two cannot be told apart on
-    /// the bus and an L7 is detected and driven as `L5`. Reported distances
-    /// are plane-perpendicular on both (the lens geometry is handled inside
-    /// the sensor); only an application that maps zones to angles needs to
-    /// know which lens it has.
+    /// VL53L5CX (45° square field of view).
     L5,
+    /// VL53L7CX: the L5 die behind a 60° lens. Driven exactly like an L5 (same
+    /// firmware patch, configuration and init quirks, [`Variant::info`] returns
+    /// the L5 table); reported distances are plane-perpendicular on both, so
+    /// only an application that maps zones to angles needs the distinction.
+    /// Known only after [`crate::Sensor::init`] has run the firmware; before
+    /// that, [`detect`] reports an L7 as [`Variant::L5`].
+    L7,
     /// VL53L8CX.
     L8,
+}
+
+/// Module type the firmware reports at DCI 0xE0C5 (byte 1 of the block at
+/// 0xE0C4) for a VL53L5CX; ST's `VL53LMZ_MODULE_TYPE_L5`.
+pub const MODULE_TYPE_L5: u8 = 0;
+/// Module type reported for a VL53L7CX; ST's `VL53LMZ_MODULE_TYPE_L7`.
+pub const MODULE_TYPE_L7: u8 = 1;
+/// Module type reported for a VL53L8CX; ST's `VL53LMZ_MODULE_TYPE_L8`.
+pub const MODULE_TYPE_L8: u8 = 2;
+
+/// DCI index of the 8-byte firmware flags block: byte 1 is the module type,
+/// byte 6 the VL53L8CX laser-safety fault flag.
+pub const FW_FLAGS_INDEX: u16 = 0xE0C4;
+
+/// Revision id of the VL53L5CX "cut 1.1" silicon, accepted as an L5 like ST's
+/// VL53LMZ ULD does; current L5CX and L7CX modules report 0x02.
+pub const L5_CUT11_REVISION_ID: u8 = 0x01;
+
+impl Variant {
+    /// The variant a firmware-reported module type names, `None` for a value
+    /// outside ST's table.
+    pub const fn from_module_type(module_type: u8) -> Option<Variant> {
+        match module_type {
+            MODULE_TYPE_L5 => Some(Variant::L5),
+            MODULE_TYPE_L7 => Some(Variant::L7),
+            MODULE_TYPE_L8 => Some(Variant::L8),
+            _ => None,
+        }
+    }
 }
 
 /// Per-variant constants and behaviour flags needed to bring a sensor up. The
@@ -185,7 +225,8 @@ impl Variant {
     /// The per-variant constants for this sensor.
     pub const fn info(self) -> &'static SensorInfo {
         match self {
-            Variant::L5 => &L5_INFO,
+            // The L7 is driven as an L5: same die, same tables, same quirks.
+            Variant::L5 | Variant::L7 => &L5_INFO,
             Variant::L8 => &L8_INFO,
         }
     }
@@ -217,7 +258,10 @@ pub async fn detect<BUS: VlBusAsync>(
     }
     match revision_id {
         r if r == L8_INFO.revision_id => Ok(Variant::L8),
-        r if r == L5_INFO.revision_id => Ok(Variant::L5),
+        // The L5-class die: current L5CX and L7CX modules (0x02) and the
+        // original L5CX cut 1.1 (0x01). Which of L5 and L7 it is comes from
+        // the firmware after init.
+        r if r == L5_INFO.revision_id || r == L5_CUT11_REVISION_ID => Ok(Variant::L5),
         other => Err(Error::UnknownRevision(other)),
     }
 }
@@ -289,6 +333,30 @@ mod tests {
     #[test]
     fn detects_l5() {
         assert_eq!(detect_with(0xF0, 0x02), Ok(Variant::L5));
+    }
+
+    /// Cut 1.1 silicon (revision 0x01) is an L5 too, as in ST's VL53LMZ ULD.
+    #[test]
+    fn detects_l5_cut11() {
+        assert_eq!(detect_with(0xF0, 0x01), Ok(Variant::L5));
+    }
+
+    /// The firmware's module-type byte names the three parts with ST's
+    /// `VL53LMZ_MODULE_TYPE_*` values; anything else is unknown.
+    #[test]
+    fn module_type_maps_to_variant() {
+        assert_eq!(Variant::from_module_type(0), Some(Variant::L5));
+        assert_eq!(Variant::from_module_type(1), Some(Variant::L7));
+        assert_eq!(Variant::from_module_type(2), Some(Variant::L8));
+        assert_eq!(Variant::from_module_type(3), None);
+        assert_eq!(Variant::from_module_type(255), None);
+    }
+
+    /// The L7 is driven with the L5 tables.
+    #[test]
+    fn l7_uses_l5_info() {
+        assert!(core::ptr::eq(Variant::L7.info(), Variant::L5.info()));
+        assert_eq!(Variant::L7.info().fw_patch.len(), 7);
     }
 
     #[test]

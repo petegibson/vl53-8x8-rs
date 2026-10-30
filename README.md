@@ -4,9 +4,9 @@
 [![crates.io](https://img.shields.io/crates/v/vl53-8x8.svg)](https://crates.io/crates/vl53-8x8)
 [![docs.rs](https://docs.rs/vl53-8x8/badge.svg)](https://docs.rs/vl53-8x8)
 
-Drivers for the **STMicroelectronics VL53L5CX and VL53L8CX**, the 8×8
-multizone Time-of-Flight ranging sensors, written against `embedded-hal` 1.0
-so they run on any microcontroller HAL or on Linux.
+Drivers for the **STMicroelectronics VL53L5CX, VL53L7CX and VL53L8CX**, the
+8×8 multizone Time-of-Flight ranging sensors, written against `embedded-hal`
+1.0 so they run on any microcontroller HAL or on Linux.
 
 ## What is this?
 
@@ -16,11 +16,13 @@ targets per zone, at up to 60 Hz. ST supports them with a C library, the
 and then drives it through a register protocol. This repository provides two
 ways to use that from Rust:
 
-- **`vl53-8x8`** is a pure-Rust, `no_std`, async driver covering **both**
-  sensors. It needs no C toolchain. At `init()` it reads the chip's revision
-  id, picks the VL53L5CX or VL53L8CX behaviour, and uploads one shared
-  firmware image patched for the detected part (the two images differ by only
-  seven bytes). It works with `embedded-hal-async` buses, with blocking buses
+- **`vl53-8x8`** is a pure-Rust, `no_std`, async driver covering **all
+  three** sensors (the VL53L7CX is the VL53L5CX die behind a wider lens). It
+  needs no C toolchain. At `init()` it reads the chip's revision id, picks
+  the VL53L5CX or VL53L8CX behaviour, uploads one shared firmware image
+  patched for the detected part (the two images differ by only seven bytes),
+  and then asks the running firmware whether an L5-class module is an L5 or
+  an L7. It works with `embedded-hal-async` buses, with blocking buses
   through small adapters, and under Embassy, RTIC 2 or no executor at all.
 - **`vl53l8cx-uld`** and **`vl53l5cx-uld`** are blocking, safe wrappers over
   ST's own C code, one per sensor. They need libclang at build time (for
