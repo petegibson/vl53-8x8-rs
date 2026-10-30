@@ -65,8 +65,33 @@ laser-safety flag (byte 6). Read after `init()` with `Sensor::dci_read`
 
 So an L5 and an L7, indistinguishable by device/revision id (both 0xF0 /
 0x02) and uploaded the same firmware, can be told apart once that firmware
-is running. One module of each so far; the values match ST's constants
-exactly, which is good evidence this is what the byte means.
+is running. ST's official package confirms it: STSW-IMG043 (VL53LMZ ULD
+2.0.16, the combined VL53L7CH/VL53L8CH driver, BSD-3-Clause) ends
+`vl53lmz_init()` with
+
+```c
+uint8_t fw_flags[8];
+status |= vl53lmz_dci_read_data(p_dev, fw_flags, 0xE0C4, sizeof(fw_flags));
+p_dev->module_type = fw_flags[1];
+//  printf("Module type = %u (0 for MZ, 1 for MZEVO, 2 for MZPlus)\n", fw_flags[1]);
+```
+
+and its changelog for 2.0.11 reads "Changed method used to set module_type
+so that it correctly distinguishes between L5 and L7 parts" (its earlier
+revision-id method mapped 0x01 to L5 and 0x02 to L7, which misfiles current
+L5CX silicon). MZ, MZEVO and MZPlus are ST's internal names for the L5, L7
+and L8 modules.
+
+The same package shows how ST relates the parts: its single
+`VL53LMZ_FIRMWARE` is byte-identical to the VL53L8CX firmware (and to
+`vl53-8x8`'s base image) and is uploaded to all three module types; the
+configuration is chosen by revision id (`VL53L8_DEFAULT_CONFIGURATION`,
+identical to the L8CX's, for 0x0C; `VL53L7_DEFAULT_CONFIGURATION` for 0x02,
+which differs from the CX L5/L7 configuration in 4 spread-spectrum bytes at
+0x2AB–0x2AE per the 2.0.13 changelog). The CH parts therefore run the CX
+firmware; the compact normalized histogram output is an output-configuration
+feature of that firmware (the CNH plugin), and ST staff describe the CH
+parts as binned for guaranteed frame rate rather than different silicon.
 
 ## Calibration signal
 
