@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use rpi_zero_2w::native::{self, Resolution};
-use rpi_zero_2w::{bus_description, print_distance_grid, FIRMWARE_SIZE_KB, LPN_GPIO, SENSOR_LABEL};
+use rpi_zero_2w::{bus_description, lpn_gpio, print_distance_grid, FIRMWARE_SIZE_KB, SENSOR_LABEL};
 
 const RESOLUTION: Resolution = Resolution::Res4x4;
 const RANGING_FREQ_HZ: u8 = 10;
@@ -23,7 +23,7 @@ const RANGING_FREQ_HZ: u8 = 10;
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    log::info!("{SENSOR_LABEL}: opening {} with LPn on BCM GPIO{LPN_GPIO}...", bus_description());
+    log::info!("{SENSOR_LABEL}: opening {} with LPn on BCM GPIO{}...", bus_description(), lpn_gpio());
     let mut sensor = native::connect()?;
 
     anyhow::ensure!(

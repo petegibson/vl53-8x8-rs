@@ -61,6 +61,30 @@ BCM GPIO5, which is header pin 29 (header pin 5 is SCL). The
 `lpn_gates_i2c` test checks the wire is really there: with LPn low the
 sensor must stop acknowledging.
 
+#### Two boards on I2C1
+
+A second VL53L5CX-class board (an L5 and an L7, say) can share SDA, SCL,
+3V3 and GND with its LPn on **BCM GPIO6 (header pin 31)**. Both Pololu
+carriers pull LPn high, so two enabled boards would both answer at 0x29;
+the crate therefore claims *every* LPn line in `LPN_GPIOS` (`[5, 6]`) and
+holds the unselected ones low. Pick the board with the `VL53_LPN_GPIO`
+environment variable (default 5), no rebuild needed; the ssh runner
+forwards it:
+
+```bash
+just test-pi i2c-bus                      # board on GPIO5
+VL53_LPN_GPIO=6 just test-pi i2c-bus      # board on GPIO6
+VL53_LPN_GPIO=6 just report-pi-nvm i2c-bus
+```
+
+To use both at once, `two_i2c` (`just run-pi two_i2c i2c-bus`) follows
+UM2884 §4.1: enable the GPIO6 board alone, move it to `SECOND_ADDRESS`
+(0x2A) with `set_i2c_address`, then enable the GPIO5 board at 0x29 and
+range both. The `two_sensors_one_bus` test does the same and restores the
+address afterwards; it skips when no board answers on GPIO6. A board left
+at 0x2A or 0x35 by an interrupted run is moved back by the next
+`connect()` (`STRAY_ADDRESSES`).
+
 ## Pi setup (one-time)
 
 ### Enable the buses

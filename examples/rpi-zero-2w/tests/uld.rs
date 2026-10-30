@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use rpi_zero_2w::uld::{
     self, Driver, PowerMode, RangingMode, Resolution, ResultsData, TargetOrder, NB_TARGET_PER_ZONE,
 };
-use rpi_zero_2w::LPN_GPIO;
+use rpi_zero_2w::lpn_gpio;
 
 /// One sensor, one test at a time.
 static HW: Mutex<()> = Mutex::new(());
@@ -34,15 +34,13 @@ const INTEGRATION_MS: u32 = 20;
 /// Open the bus and LPn (LPn high) without initialising the sensor.
 fn connect() -> (MutexGuard<'static, ()>, Driver) {
     let guard = HW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    #[cfg(feature = "i2c-bus")]
-    if rpi_zero_2w::recover_default_address(TEMP_ADDRESS).expect("probe for a stray address") {
-        eprintln!("moved a sensor left at {TEMP_ADDRESS:#04x} back to the default address");
-    }
+    // connect() also moves a sensor back from a stray address (see
+    // rpi_zero_2w::STRAY_ADDRESSES) if an earlier run died half-way.
     let sensor = uld::connect().expect("open the bus and LPn (device permissions? wiring?)");
     (guard, sensor)
 }
 
-/// Address used by `set_address_round_trip`.
+/// Address used by `set_address_round_trip`; listed in `STRAY_ADDRESSES`.
 const TEMP_ADDRESS: u8 = 0x35;
 
 /// [`connect`] followed by `init()` (firmware upload).
@@ -85,7 +83,7 @@ fn sensor_alive() {
     let (_hw, mut sensor) = connect();
     assert!(
         sensor.is_alive().expect("is_alive bus transaction"),
-        "sensor.is_alive returned false: check wiring, the bus-mode selector and LPn on BCM GPIO{LPN_GPIO}"
+        "sensor.is_alive returned false: check wiring, the bus-mode selector and LPn on BCM GPIO{}", lpn_gpio()
     );
 }
 
@@ -331,7 +329,7 @@ fn lpn_gates_i2c() {
     let gated = sensor.is_alive();
     assert!(
         !matches!(gated, Ok(true)),
-        "sensor still answered with LPn low (is LPn really on BCM GPIO{LPN_GPIO}?): {gated:?}"
+        "sensor still answered with LPn low (is LPn really on BCM GPIO{}?): {gated:?}", lpn_gpio()
     );
 
     sensor.lpn_enable().unwrap();

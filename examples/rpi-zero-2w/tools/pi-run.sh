@@ -40,4 +40,10 @@ for a in "$@"; do
     args+=" $(printf '%q' "$a")"
 done
 
-exec ssh $tty_flag "$host" "cd '$remote_dir' && RUST_TEST_THREADS=1 RUST_LOG='${RUST_LOG:-info}' ./'$name'$args"
+# VL53_LPN_GPIO (which I2C board to drive, 5 or 6) is forwarded when set.
+lpn_env=""
+if [ -n "${VL53_LPN_GPIO:-}" ]; then
+    lpn_env="VL53_LPN_GPIO='$VL53_LPN_GPIO' "
+fi
+
+exec ssh $tty_flag "$host" "cd '$remote_dir' && ${lpn_env}RUST_TEST_THREADS=1 RUST_LOG='${RUST_LOG:-info}' ./'$name'$args"

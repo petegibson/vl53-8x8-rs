@@ -20,7 +20,7 @@ use rpi_zero_2w::native::{
     self, Driver, PowerMode, RangingMode, Resolution, ResultsData, TargetOrder, Variant,
     EXPECTED_VARIANT, NB_TARGET_PER_ZONE,
 };
-use rpi_zero_2w::LPN_GPIO;
+use rpi_zero_2w::lpn_gpio;
 
 /// One sensor, one test at a time.
 static HW: Mutex<()> = Mutex::new(());
@@ -34,16 +34,76 @@ const INTEGRATION_MS: u32 = 20;
 /// Open the bus and LPn (LPn high) without initialising the sensor.
 fn connect() -> (MutexGuard<'static, ()>, Driver) {
     let guard = HW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    #[cfg(feature = "i2c-bus")]
-    if rpi_zero_2w::recover_default_address(TEMP_ADDRESS).expect("probe for a stray address") {
-        eprintln!("moved a sensor left at {TEMP_ADDRESS:#04x} back to the default address");
-    }
+    // connect() also moves a sensor back from a stray address (see
+    // rpi_zero_2w::STRAY_ADDRESSES) if an earlier run died half-way.
     let sensor = native::connect().expect("open the bus and LPn (device permissions? wiring?)");
     (guard, sensor)
 }
 
-/// Address used by `set_address_round_trip`.
+/// Address used by `set_address_round_trip`; listed in `STRAY_ADDRESSES`.
 const TEMP_ADDRESS: u8 = 0x35;
+
+/// Two boards on I2C1 at once (`i2c-bus` only): silence both, enable the
+/// second (GPIO6), move it to `SECOND_ADDRESS`, enable the first (GPIO5),
+/// init both and take a frame from each. Skips (passes) when nothing answers
+/// on the second LPn line, so a single-board rig still runs the suite.
+/// Restores the second board's address with the first silenced again.
+#[cfg(feature = "i2c-bus")]
+#[tokio::test(flavor = "current_thread")]
+async fn two_sensors_one_bus() {
+    use rpi_zero_2w::{open_all_lpn, open_i2c, LPN_HOLD_LOW, SECOND_ADDRESS};
+    use vl53_8x8::{BlockingI2c, Sensor, DEFAULT_ADDRESS};
+    let _hw = HW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    // Every LPn claimed low: both boards silent.
+    let mut lpns = open_all_lpn().expect("claim LPn lines");
+    assert!(lpns.len() >= 2, "need two LPn lines for this test");
+    let (gpio_a, lpn_a) = lpns.remove(0);
+    let (gpio_b, lpn_b) = lpns.remove(0);
+    std::thread::sleep(LPN_HOLD_LOW);
+
+    // Second board first: enable it alone and move it off the default address.
+    let mut b = Sensor::new(BlockingI2c(open_i2c().unwrap()), rpi_zero_2w::TokioDelay).with_lpn_pin(lpn_b);
+    b.lpn_enable().unwrap();
+    std::thread::sleep(LPN_HOLD_LOW);
+    match b.is_alive().await {
+        Ok(true) => {}
+        other => {
+            eprintln!("no second board on LPn GPIO{gpio_b} ({other:?}); skipping two-sensor test");
+            return;
+        }
+    }
+    b.set_i2c_address(SECOND_ADDRESS).await.unwrap();
+    assert!(b.is_alive().await.unwrap(), "second board not answering at {SECOND_ADDRESS:#04x}");
+
+    // Now the first board can come up at the default address.
+    let mut a = Sensor::new(BlockingI2c(open_i2c().unwrap()), rpi_zero_2w::TokioDelay).with_lpn_pin(lpn_a);
+    a.lpn_enable().unwrap();
+    std::thread::sleep(LPN_HOLD_LOW);
+    assert!(a.is_alive().await.unwrap(), "first board (GPIO{gpio_a}) not answering at the default address");
+
+    a.init().await.unwrap();
+    b.init().await.unwrap();
+    eprintln!("GPIO{gpio_a} @ {DEFAULT_ADDRESS:#04x}: {:?}; GPIO{gpio_b} @ {SECOND_ADDRESS:#04x}: {:?}", a.variant(), b.variant());
+
+    for s in [&mut a, &mut b] {
+        s.set_resolution(Resolution::Res4x4).await.unwrap();
+        s.set_ranging_frequency_hz(5).await.unwrap();
+        s.set_integration_time_ms(INTEGRATION_MS).await.unwrap();
+        s.start_ranging().await.unwrap();
+    }
+    for s in [&mut a, &mut b] {
+        wait_ready(s).await;
+        let data = s.get_ranging_data().await.unwrap();
+        assert_zone_distances(&data, 16);
+        s.stop_ranging().await.unwrap();
+    }
+
+    // Put the second board back at the default address, with the first silent.
+    a.lpn_disable().unwrap();
+    b.set_i2c_address(DEFAULT_ADDRESS).await.unwrap();
+    assert!(b.is_alive().await.unwrap(), "second board did not return to the default address");
+}
 
 /// [`connect`] followed by `init()` (autodetect + firmware upload).
 async fn init() -> (MutexGuard<'static, ()>, Driver) {
@@ -84,7 +144,7 @@ async fn sensor_alive() {
     let (_hw, mut sensor) = connect();
     assert!(
         sensor.is_alive().await.expect("is_alive bus transaction"),
-        "sensor.is_alive returned false: check wiring, the bus-mode selector and LPn on BCM GPIO{LPN_GPIO}"
+        "sensor.is_alive returned false: check wiring, the bus-mode selector and LPn on BCM GPIO{}", lpn_gpio()
     );
 }
 
@@ -330,7 +390,7 @@ async fn lpn_gates_i2c() {
     let gated = sensor.is_alive().await;
     assert!(
         !matches!(gated, Ok(true)),
-        "sensor still answered with LPn low (is LPn really on BCM GPIO{LPN_GPIO}?): {gated:?}"
+        "sensor still answered with LPn low (is LPn really on BCM GPIO{}?): {gated:?}", lpn_gpio()
     );
 
     sensor.lpn_enable().unwrap();

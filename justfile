@@ -125,6 +125,7 @@ run-evo-uld features="":
 # crate's .cargo/config.toml installs tools/pi-run.sh as the cargo runner,
 # which copies the binary to the Pi over ssh and runs it there (PI_HOST,
 # default `pi@toftestpi`). Features: "" = VL53L8CX/SPI, `i2c-bus` = VL53L5CX/I2C.
+# With two I2C boards, VL53_LPN_GPIO=5|6 picks the one to drive (default 5).
 
 pi_target := "aarch64-unknown-linux-musl"
 

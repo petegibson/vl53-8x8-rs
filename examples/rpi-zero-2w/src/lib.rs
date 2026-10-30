@@ -54,12 +54,37 @@ use linux_embedded_hal::{CdevPin, I2cdev, SpidevDevice};
 /// Pi GPIO chip used for general-purpose pins.
 pub const GPIOCHIP: &str = "/dev/gpiochip0";
 
-/// LPn (I2C comms enable, active low; not a reset) BCM GPIO number: GPIO17
-/// (header pin 11) for the SPI board, GPIO5 (header pin 29) for the I2C one.
+/// LPn lines (I2C comms enable, active low; not a reset) of every board on
+/// this build's bus, as BCM GPIO numbers. SPI: the VL53L8CX on GPIO17
+/// (header pin 11). I2C: up to two boards sharing I2C1, GPIO5 (header pin
+/// 29) and GPIO6 (header pin 31). The Pololu carriers pull LPn high on
+/// board, so [`open_lpn`] claims *all* of these and holds the unselected
+/// ones low: two enabled sensors at the default address would both answer.
 #[cfg(not(feature = "i2c-bus"))]
-pub const LPN_GPIO: u32 = 17;
+pub const LPN_GPIOS: &[u32] = &[17];
 #[cfg(feature = "i2c-bus")]
-pub const LPN_GPIO: u32 = 5;
+pub const LPN_GPIOS: &[u32] = &[5, 6];
+
+/// Environment variable naming the BCM GPIO of the LPn line to drive, i.e.
+/// which board the bins and tests talk to. Must be one of [`LPN_GPIOS`].
+pub const LPN_ENV: &str = "VL53_LPN_GPIO";
+
+/// The LPn line in use: `VL53_LPN_GPIO` if set, else the first of
+/// [`LPN_GPIOS`] (GPIO17 for SPI, GPIO5 for I2C).
+pub fn lpn_gpio() -> u32 {
+    match std::env::var(LPN_ENV) {
+        Ok(v) => {
+            let gpio: u32 = v.trim().parse().unwrap_or_else(|_| panic!("{LPN_ENV}={v:?} is not a GPIO number"));
+            assert!(LPN_GPIOS.contains(&gpio), "{LPN_ENV}={gpio} is not one of this build's LPn lines {LPN_GPIOS:?}");
+            gpio
+        }
+        Err(_) => LPN_GPIOS[0],
+    }
+}
+
+/// Address the second I2C board is moved to by the `two_i2c` bin and test,
+/// so both can be enabled at once.
+pub const SECOND_ADDRESS: u8 = 0x2A;
 
 /// Which breakout this build talks to, for log lines.
 #[cfg(not(feature = "i2c-bus"))]
@@ -160,9 +185,43 @@ pub fn open_i2c() -> anyhow::Result<SensorI2c> {
     Ok(LinuxI2c(dev))
 }
 
-/// Acquire [`LPN_GPIO`] as an output driving LPn, initially low (I2C disabled).
+/// LPn lines of unselected boards, claimed low once per process and kept
+/// (gpio-cdev holds a line only while its handle lives, and a line cannot be
+/// requested twice, so `connect()` can be called repeatedly, as the test
+/// suites do).
+static HELD_LOW: std::sync::Mutex<Vec<(u32, CdevPin)>> = std::sync::Mutex::new(Vec::new());
+
+/// Claim every LPn line in [`LPN_GPIOS`] low and return the handle for the
+/// selected one ([`lpn_gpio`]), still low. The other lines stay claimed and
+/// low for the rest of the process (see [`HELD_LOW`]), so an unselected board
+/// on the same bus cannot answer at the default address.
 pub fn open_lpn() -> anyhow::Result<LpnPin> {
-    open_lpn_gpio(LPN_GPIO)
+    let selected = lpn_gpio();
+    anyhow::ensure!(LPN_GPIOS.contains(&selected), "LPn GPIO{selected} is not in {LPN_GPIOS:?}");
+    let mut held = HELD_LOW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for &gpio in LPN_GPIOS {
+        if gpio != selected && !held.iter().any(|(g, _)| *g == gpio) {
+            held.push((gpio, open_lpn_gpio(gpio)?));
+        }
+    }
+    open_lpn_gpio(selected)
+}
+
+/// Claim every LPn line in [`LPN_GPIOS`] low and return all of them, in
+/// [`LPN_GPIOS`] order, for code that drives several boards itself. Lines
+/// already held low by an earlier [`open_lpn`] in this process are handed
+/// over rather than requested again.
+pub fn open_all_lpn() -> anyhow::Result<Vec<(u32, LpnPin)>> {
+    let mut held = HELD_LOW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut out = Vec::with_capacity(LPN_GPIOS.len());
+    for &gpio in LPN_GPIOS {
+        let pin = match held.iter().position(|(g, _)| *g == gpio) {
+            Some(i) => held.remove(i).1,
+            None => open_lpn_gpio(gpio)?,
+        };
+        out.push((gpio, pin));
+    }
+    Ok(out)
 }
 
 /// Acquire BCM `gpio` as an output driving LPn, initially low (I2C disabled).
@@ -274,26 +333,49 @@ impl embedded_hal::i2c::I2c for LinuxI2c {
     }
 }
 
-/// Put a sensor that an interrupted address test left at `stray` back at the
-/// default address. Probes `stray` only if nothing answers at the default
-/// (a page-select write, harmless), then sends ST's address-change sequence
-/// (`0x7FFF=0x00`, `0x0004=new address`, `0x7FFF=0x02`). Returns `true` if
-/// it moved the sensor. Used by the test suites' `connect()` so one failed
-/// run does not need a power cycle to recover.
+/// Addresses an interrupted test or demo may have left the enabled sensor at:
+/// the test suites' temporary address and [`SECOND_ADDRESS`].
+pub const STRAY_ADDRESSES: &[u8] = &[0x35, SECOND_ADDRESS];
+
+/// Put a sensor that an interrupted run left at one of `strays` back at the
+/// default address. Only the sensor whose LPn is high can answer, so call it
+/// after [`open_lpn`] has silenced the other boards. Probes the strays only
+/// if nothing answers at the default (a page-select write, harmless), then
+/// sends ST's address-change sequence (`0x7FFF=0x00`, `0x0004=new address`,
+/// `0x7FFF=0x02`). Returns the address it moved the sensor from, if any.
+/// `connect()` runs this so one failed run does not need a power cycle.
 #[cfg(feature = "i2c-bus")]
-pub fn recover_default_address(stray: u8) -> anyhow::Result<bool> {
+pub fn recover_default_address(strays: &[u8]) -> anyhow::Result<Option<u8>> {
     use embedded_hal::i2c::I2c;
     const DEFAULT: u8 = vl53_8x8::DEFAULT_ADDRESS;
     let mut bus = open_i2c()?;
     if bus.write(DEFAULT, &[0x7F, 0xFF, 0x00]).is_ok() {
-        return Ok(false);
+        return Ok(None);
     }
-    if bus.write(stray, &[0x7F, 0xFF, 0x00]).is_err() {
-        return Ok(false);
+    for &stray in strays {
+        if bus.write(stray, &[0x7F, 0xFF, 0x00]).is_ok() {
+            bus.write(stray, &[0x00, 0x04, DEFAULT]).context("write new address")?;
+            bus.write(DEFAULT, &[0x7F, 0xFF, 0x02]).context("restore page")?;
+            return Ok(Some(stray));
+        }
     }
-    bus.write(stray, &[0x00, 0x04, DEFAULT]).context("write new address")?;
-    bus.write(DEFAULT, &[0x7F, 0xFF, 0x02]).context("restore page")?;
-    Ok(true)
+    Ok(None)
+}
+
+/// Shared tail of the `connect()` functions: hold LPn low briefly, enable
+/// comms on the selected board, then (I2C) move it back to the default
+/// address if an earlier run left it elsewhere.
+fn finish_connect<E: std::fmt::Debug>(lpn_enable: impl FnOnce() -> Result<(), E>) -> anyhow::Result<()> {
+    // open_lpn() leaves LPn low (comms disabled); hold it there briefly so a
+    // transaction a previous process aborted half-way is dropped by the
+    // sensor's I2C block before comms are re-enabled.
+    std::thread::sleep(LPN_HOLD_LOW);
+    lpn_enable().map_err(|e| anyhow::anyhow!("drive LPn high: {e:?}"))?;
+    #[cfg(feature = "i2c-bus")]
+    if let Some(from) = recover_default_address(STRAY_ADDRESSES)? {
+        log::warn!("moved the sensor on GPIO{} back from {from:#04x} to the default address", lpn_gpio());
+    }
+    Ok(())
 }
 
 // --- Delay providers ---
@@ -353,11 +435,7 @@ pub mod uld {
         let mut sensor = Vl53l8cx::new_spi(crate::open_spi()?, crate::StdDelay).with_lpn_pin(lpn);
         #[cfg(feature = "i2c-bus")]
         let mut sensor = Vl53l5cx::new(crate::open_i2c()?, crate::StdDelay).with_lpn_pin(lpn);
-        // open_lpn() leaves LPn low (comms disabled); hold it there briefly so a
-        // transaction a previous process aborted half-way is dropped by the
-        // sensor's I2C block before comms are re-enabled.
-        std::thread::sleep(crate::LPN_HOLD_LOW);
-        sensor.lpn_enable().context("drive LPn high")?;
+        crate::finish_connect(|| sensor.lpn_enable())?;
         Ok(sensor)
     }
 }
@@ -404,9 +482,7 @@ pub mod native {
         #[cfg(feature = "i2c-bus")]
         let bus = vl53_8x8::BlockingI2c(crate::open_i2c()?);
         let mut sensor = Sensor::new(bus, crate::TokioDelay).with_lpn_pin(lpn);
-        // See `uld::connect`: a short LPn-low hold before enabling comms.
-        std::thread::sleep(crate::LPN_HOLD_LOW);
-        sensor.lpn_enable().context("drive LPn high")?;
+        crate::finish_connect(|| sensor.lpn_enable())?;
         Ok(sensor)
     }
 }

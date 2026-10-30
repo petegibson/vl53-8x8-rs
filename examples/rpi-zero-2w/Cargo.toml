@@ -39,5 +39,11 @@ test = false
 name = "async_demo"
 test = false
 
+# Two boards on I2C1 (LPn on GPIO5 and GPIO6), second moved to 0x2A.
+[[bin]]
+name = "two_i2c"
+test = false
+required-features = ["i2c-bus"]
+
 # Standalone root: this demo is excluded from the parent workspace.
 [workspace]
