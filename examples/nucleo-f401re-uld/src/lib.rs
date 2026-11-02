@@ -104,10 +104,7 @@ pub fn board_init() -> Sensor {
     let mut pwr_en_c = gpioa.pa7.into_push_pull_output(); // PWR_EN_C
     let lp_c = gpiob.pb0.into_push_pull_output(); // LPn center
     let int_c = gpioa.pa4.into_pull_up_input(); // INT center
-    // The shield's I2C_RST_C line is on PB3 (D3, shared with SPI1 SCK). It is
-    // active high and must sit low for the sensor's I2C interface to answer;
-    // left floating it reads as held in reset (every transfer NACKed). Drive
-    // it low for the life of the program, as the RTIC and Embassy examples do.
+    // I2C_RST_C (PB3, shared with SPI1 SCK) must be held low for I2C to work.
     let i2c_rst_c = gpiob
         .pb3
         .into_push_pull_output_in_state(stm32f4xx_hal::gpio::PinState::Low);
