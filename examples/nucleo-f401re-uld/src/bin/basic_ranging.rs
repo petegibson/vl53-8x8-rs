@@ -5,7 +5,7 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 use cortex_m_rt::entry;
-use vl53l8cx_uld::Resolution;
+use nucleo_f401re_uld::uld::Resolution;
 
 // --- Configuration ---
 const RESOLUTION: Resolution = Resolution::Res4x4;

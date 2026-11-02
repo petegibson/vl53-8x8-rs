@@ -12,6 +12,8 @@ defmt-rtt = "0.4"
 stm32f4xx-hal = { version = "0.22", features = ["stm32f401"] }
 embedded-hal = "1.0"
 vl53l8cx-uld = { path = "../../vl53l8cx-uld" }
+# For an X-NUCLEO-53L7A1 (VL53L7CX, I2C only): ST's L7 ULD via `l7-uld`.
+vl53l7cx-uld = { path = "../../vl53l7cx-uld", optional = true }
 embedded-hal-bus = { version = "0.2", optional = true }
 panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
 
@@ -20,17 +22,21 @@ embedded-test = { version = "0.7", features = ["defmt"] }
 
 [features]
 default = ["dep:panic-probe"]
-defmt = ["vl53l8cx-uld/defmt"]
+defmt = ["vl53l8cx-uld/defmt", "vl53l7cx-uld?/defmt"]
 defmt-bus-trace = ["defmt"]
 spi-bus = ["dep:embedded-hal-bus", "dep:panic-probe"]
-xtalk = ["vl53l8cx-uld/xtalk"]
-motion = ["vl53l8cx-uld/motion"]
-thresholds = ["vl53l8cx-uld/thresholds"]
+# X-NUCLEO-53L7A1 instead of the 53L8A1: same control pins (LPn A3/PB0,
+# PWR_EN D11/PA7, INT A2/PA4), I2C only, driven through `vl53l7cx-uld`.
+# Not combinable with `spi-bus`.
+l7-uld = ["dep:vl53l7cx-uld"]
+xtalk = ["vl53l8cx-uld/xtalk", "vl53l7cx-uld?/xtalk"]
+motion = ["vl53l8cx-uld/motion", "vl53l7cx-uld?/motion"]
+thresholds = ["vl53l8cx-uld/thresholds", "vl53l7cx-uld?/thresholds"]
 # Targets per zone; enable at most one. Tests index results with
 # `zone * NB_TARGET_PER_ZONE + target`.
-targets-2 = ["vl53l8cx-uld/targets-2"]
-targets-3 = ["vl53l8cx-uld/targets-3"]
-targets-4 = ["vl53l8cx-uld/targets-4"]
+targets-2 = ["vl53l8cx-uld/targets-2", "vl53l7cx-uld?/targets-2"]
+targets-3 = ["vl53l8cx-uld/targets-3", "vl53l7cx-uld?/targets-3"]
+targets-4 = ["vl53l8cx-uld/targets-4", "vl53l7cx-uld?/targets-4"]
 
 [lib]
 test = false

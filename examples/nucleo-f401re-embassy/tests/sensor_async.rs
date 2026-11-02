@@ -5,7 +5,7 @@ use defmt_rtt as _;
 
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_time::Delay;
-use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder, NB_TARGET_PER_ZONE};
+use vl53_8x8::{PowerMode, RangingMode, Resolution, TargetOrder, Variant, NB_TARGET_PER_ZONE};
 
 #[cfg(feature = "thresholds")]
 use vl53_8x8::{
@@ -538,14 +538,22 @@ mod tests {
 
     #[test]
     #[timeout(10)]
+    /// The sync pin exists on the VL53L8CX only. With an X-NUCLEO-53L8A1 the
+    /// round trip must succeed; with an X-NUCLEO-53L7A1 (same pins, I2C) the
+    /// driver must refuse without touching the bus.
     async fn test_external_sync_pin_enable(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
 
-        sensor.set_external_sync_pin_enable(true).await.unwrap();
-        defmt::assert!(sensor.get_external_sync_pin_enable().await.unwrap());
+        if sensor.variant() == Variant::L8 {
+            sensor.set_external_sync_pin_enable(true).await.unwrap();
+            defmt::assert!(sensor.get_external_sync_pin_enable().await.unwrap());
 
-        sensor.set_external_sync_pin_enable(false).await.unwrap();
-        defmt::assert!(!sensor.get_external_sync_pin_enable().await.unwrap());
+            sensor.set_external_sync_pin_enable(false).await.unwrap();
+            defmt::assert!(!sensor.get_external_sync_pin_enable().await.unwrap());
+        } else {
+            defmt::assert!(sensor.set_external_sync_pin_enable(true).await.is_err());
+            defmt::assert!(sensor.get_external_sync_pin_enable().await.is_err());
+        }
     }
 
     #[cfg(not(feature = "spi-bus"))]
@@ -597,13 +605,19 @@ mod tests {
         defmt::assert!(!sensor.get_detection_thresholds_enable().await.unwrap());
     }
 
-    /// Auto-stop is a VL53L8CX-only plugin function (the L5 ULD lacks it); the
-    /// Nucleo shield carries an L8, so the round trip must succeed.
+    /// Auto-stop is a VL53L8CX-only plugin function (the L5/L7 ULDs lack it):
+    /// round trip on an X-NUCLEO-53L8A1, refused on an X-NUCLEO-53L7A1.
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
     async fn test_detection_thresholds_auto_stop(mut sensor: SensorRef) {
         sensor.init().await.unwrap();
+
+        if sensor.variant() != Variant::L8 {
+            defmt::assert!(sensor.get_detection_thresholds_auto_stop().await.is_err());
+            defmt::assert!(sensor.set_detection_thresholds_auto_stop(true).await.is_err());
+            return;
+        }
 
         // Default after init is off.
         defmt::assert!(!sensor.get_detection_thresholds_auto_stop().await.unwrap());

@@ -1,7 +1,22 @@
 #![no_std]
 
 use stm32f4xx_hal::{pac, prelude::*};
+#[cfg(not(feature = "l7-uld"))]
 use vl53l8cx_uld::Vl53l8cx;
+#[cfg(feature = "l7-uld")]
+use vl53l7cx_uld::Vl53l7cx;
+
+/// The ULD wrapper crate this build drives the shield with: `vl53l8cx-uld`
+/// for the X-NUCLEO-53L8A1, `vl53l7cx-uld` for the X-NUCLEO-53L7A1
+/// (`l7-uld`). The two have the same API shape; bins and tests import
+/// through this alias.
+#[cfg(not(feature = "l7-uld"))]
+pub use vl53l8cx_uld as uld;
+#[cfg(feature = "l7-uld")]
+pub use vl53l7cx_uld as uld;
+
+#[cfg(all(feature = "l7-uld", feature = "spi-bus"))]
+compile_error!("the VL53L7CX has no SPI interface: `l7-uld` cannot be combined with `spi-bus`");
 
 pub type SensorDelay = stm32f4xx_hal::timer::SysDelay;
 
@@ -10,11 +25,22 @@ pub type SensorDelay = stm32f4xx_hal::timer::SysDelay;
 #[cfg(not(feature = "spi-bus"))]
 pub type SensorI2c = stm32f4xx_hal::i2c::I2c<pac::I2C1>;
 
-#[cfg(not(feature = "spi-bus"))]
+#[cfg(all(not(feature = "spi-bus"), not(feature = "l7-uld")))]
 vl53l8cx_uld::bind_platform_driver!(SensorI2c, SensorDelay);
+#[cfg(feature = "l7-uld")]
+vl53l7cx_uld::bind_platform_driver!(SensorI2c, SensorDelay);
 
-#[cfg(not(feature = "spi-bus"))]
+#[cfg(all(not(feature = "spi-bus"), not(feature = "l7-uld")))]
 pub type Sensor = Vl53l8cx<
+    SensorI2c,
+    SensorDelay,
+    stm32f4xx_hal::gpio::Pin<'B', 0, stm32f4xx_hal::gpio::Output>, // LPn (comms enable)
+    stm32f4xx_hal::gpio::Pin<'A', 4, stm32f4xx_hal::gpio::Input>,  // INT
+    stm32f4xx_hal::gpio::Pin<'A', 7, stm32f4xx_hal::gpio::Output>, // PWR_EN_C (active high)
+>;
+/// X-NUCLEO-53L7A1: same control pins as the 53L8A1 (LPn A3, INT A2, PWR_EN D11).
+#[cfg(feature = "l7-uld")]
+pub type Sensor = Vl53l7cx<
     SensorI2c,
     SensorDelay,
     stm32f4xx_hal::gpio::Pin<'B', 0, stm32f4xx_hal::gpio::Output>, // LPn (comms enable)
@@ -78,6 +104,14 @@ pub fn board_init() -> Sensor {
     let mut pwr_en_c = gpioa.pa7.into_push_pull_output(); // PWR_EN_C
     let lp_c = gpiob.pb0.into_push_pull_output(); // LPn center
     let int_c = gpioa.pa4.into_pull_up_input(); // INT center
+    // The shield's I2C_RST_C line is on PB3 (D3, shared with SPI1 SCK). It is
+    // active high and must sit low for the sensor's I2C interface to answer;
+    // left floating it reads as held in reset (every transfer NACKed). Drive
+    // it low for the life of the program, as the RTIC and Embassy examples do.
+    let i2c_rst_c = gpiob
+        .pb3
+        .into_push_pull_output_in_state(stm32f4xx_hal::gpio::PinState::Low);
+    core::mem::forget(i2c_rst_c);
 
     // --- Power-up sequence (board bring-up; `power_cycle()` below does the same) ---
     pwr_en_c.set_low();
@@ -94,7 +128,11 @@ pub fn board_init() -> Sensor {
         &clocks,
     );
 
-    let mut sensor = Vl53l8cx::new(i2c, delay)
+    #[cfg(not(feature = "l7-uld"))]
+    let sensor = Vl53l8cx::new(i2c, delay);
+    #[cfg(feature = "l7-uld")]
+    let sensor = Vl53l7cx::new(i2c, delay);
+    let mut sensor = sensor
         .with_lpn_pin(lp_c)
         .with_interrupt_pin_active_low(int_c)
         .with_power_enable_pin_active_high(pwr_en_c);

@@ -3,12 +3,15 @@
 
 use defmt_rtt as _;
 
-use vl53l8cx_uld::{
+// `uld` is `vl53l8cx_uld` (X-NUCLEO-53L8A1) or `vl53l7cx_uld` (X-NUCLEO-53L7A1,
+// `l7-uld`); the two wrappers share an API apart from the L8-only functions
+// gated below.
+use nucleo_f401re_uld::uld::{
     PowerMode, RangingMode, Resolution, ResultsData, TargetOrder, NB_TARGET_PER_ZONE,
 };
 
 #[cfg(feature = "thresholds")]
-use vl53l8cx_uld::{
+use nucleo_f401re_uld::uld::{
     DetectionThreshold, MotionConfiguration, ThresholdMeasurement, ThresholdOperation,
     ThresholdType, VL53L8CX_LAST_THRESHOLD,
 };
@@ -270,6 +273,8 @@ mod tests {
 
     #[test]
     #[timeout(10)]
+    // VL53L8CX only: the L7 ULD has no sync-pin functions.
+    #[cfg(not(feature = "l7-uld"))]
     fn test_external_sync_pin_enable(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 
@@ -323,6 +328,8 @@ mod tests {
     #[cfg(feature = "thresholds")]
     #[test]
     #[timeout(10)]
+    // VL53L8CX only: the L7 ULD has no auto-stop functions.
+    #[cfg(not(feature = "l7-uld"))]
     fn test_detection_thresholds_auto_stop(mut sensor: nucleo_f401re_uld::Sensor) {
         sensor.init().unwrap();
 

@@ -6,7 +6,9 @@
 #
 # Hardware recipes flash via probe-rs. The Nucleo + X-NUCLEO-53L8A1 shield
 # must be jumpered into SPI mode for `spi-bus`; `blocking-i2c` (embassy demo)
-# or no bus feature selects I2C. The evo board is I2C-only.
+# or no bus feature selects I2C. With an X-NUCLEO-53L7A1 (VL53L7CX, I2C only,
+# same control pins) use no bus feature for the embassy suite and `l7-uld`
+# for the ULD suite (`just test-nucleo-uld l7-uld`). The evo board is I2C-only.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -51,7 +53,7 @@ publish-dry-run:
     cargo publish --workspace --dry-run
 
 # ---------------------------------------------------------------------------
-# Nucleo F401RE + X-NUCLEO-53L8A1 (VL53L8CX)
+# Nucleo F401RE + X-NUCLEO-53L8A1 (VL53L8CX) or X-NUCLEO-53L7A1 (VL53L7CX)
 # ---------------------------------------------------------------------------
 
 # Test: blocking ULD wrapper suite (features e.g. `spi-bus,thresholds`)

@@ -56,9 +56,11 @@ run against real hardware and are exercised by on-target test suites in
 | STM32F401RE Nucleo + X-NUCLEO-53L8A1    | VL53L8CX          | I²C and SPI  | `vl53-8x8`      | Embassy (async DMA)           |
 | STM32F401RE Nucleo + X-NUCLEO-53L8A1    | VL53L8CX          | I²C and SPI  | `vl53l8cx-uld`  | `stm32f4xx-hal` (blocking)    |
 | STM32F401RE Nucleo + X-NUCLEO-53L8A1    | VL53L8CX          | SPI          | `vl53-8x8`      | RTIC 2 + `stm32f4xx-hal`      |
+| STM32F401RE Nucleo + X-NUCLEO-53L7A1    | VL53L7CX          | I²C          | `vl53-8x8`      | Embassy (async DMA)           |
+| STM32F401RE Nucleo + X-NUCLEO-53L7A1    | VL53L7CX          | I²C          | `vl53l7cx-uld`  | `stm32f4xx-hal` (blocking), `l7-uld` feature |
 | Custom STM32F412RE test PCB             | VL53L5CX, VL53L8CX| I²C          | `vl53-8x8`      | Embassy (async DMA)           |
 | Custom STM32F412RE test PCB             | VL53L5CX          | I²C          | `vl53l5cx-uld`  | `stm32f4xx-hal` (blocking)    |
-| Raspberry Pi Zero 2W + Pololu breakout  | VL53L8CX          | SPI          | both            | Linux, `linux-embedded-hal`, Tokio |
+| Raspberry Pi Zero 2W + Pololu breakouts | VL53L8CX (SPI), VL53L5CX and VL53L7CX (I²C) | SPI and I²C | all | Linux, `linux-embedded-hal`, Tokio |
 
 Other `embedded-hal` 1.0 implementations should work; only the targets above
 have been validated end to end.
